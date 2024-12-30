@@ -1,0 +1,6 @@
+[
+    {
+        "problem": "Janet's ducks lay 16 eggs per day. She eats three for breakfast and uses four for muffins. She sells the rest at $2 each. How much does she make daily?",
+        "solution": "1. Calculate remaining eggs for sale. Eggs available = < 16 - 3 - 4 = 9 > eggs.\n2. Calculate daily revenue. Daily revenue = 9 eggs × $2 per egg = < 9 * 2 = 18 > dollars.\n#### 18"
+    }
+]

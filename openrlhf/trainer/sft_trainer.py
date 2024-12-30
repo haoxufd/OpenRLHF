@@ -1,3 +1,4 @@
+import json
 import os
 from abc import ABC
 
@@ -37,12 +38,14 @@ class SFTTrainer(ABC):
         optim: Optimizer,
         train_dataloader,
         eval_dataloader,
+        eval_gen_dataloader,
         scheduler,
         max_norm: float = 1,
         pretrain_mode: bool = False,
         batch_size: int = 1,
         max_epochs: int = 2,
         tokenizer=None,
+        eval_gen_tokenizer=None
     ) -> None:
         super().__init__()
         self.strategy = strategy
@@ -51,10 +54,12 @@ class SFTTrainer(ABC):
         self.max_norm = max_norm
         self.train_dataloader = train_dataloader
         self.eval_dataloader = eval_dataloader
+        self.eval_gen_dataloader = eval_gen_dataloader
         self.scheduler = scheduler
         self.pretrain_mode = pretrain_mode
         self.model = model
         self.tokenizer = tokenizer
+        self.eval_gen_tokenizer = eval_gen_tokenizer
         self.optimizer = optim
         self.args = strategy.args
 
@@ -214,12 +219,43 @@ class SFTTrainer(ABC):
             elif self._tensorboard is not None and self.strategy.is_rank_0():
                 for k, v in logs_dict.items():
                     self._tensorboard.add_scalar(f"train/{k}", v, global_step)
+        
+        def get_next_eval_gen_file(directory='xuhao/sft/data/output'):
+            import re
+            # 获取目录下所有文件
+            files = os.listdir(directory)
+            
+            # 用正则表达式匹配 eval_step_数字.json 格式的文件
+            pattern = re.compile(r'eval_step_(\d+)\.json$')
+            
+            # 找出所有匹配的文件，提取编号
+            step_numbers = []
+            for file in files:
+                match = pattern.match(file)
+                if match:
+                    step_numbers.append(int(match.group(1)))
+            
+            # 如果没有找到匹配的文件，返回 0
+            if not step_numbers:
+                return "xuhao/sft/data/output/eval_step_0.json"
+            
+            # 否则返回最大编号 + 1
+            return "xuhao/sft/data/output/eval_step_{}.json".format(max(step_numbers)+1)
 
         # eval
         if global_step % args.eval_steps == 0:
             # do eval when len(dataloader) > 0, avoid zero division in eval.
             if len(self.eval_dataloader) > 0:
                 self.evaluate(self.eval_dataloader, global_step)
+        
+        # compute verification accuracy in eval dataset
+        if global_step % args.eval_acc_steps == 0:
+            if len(self.eval_dataloader) > 0:
+                generated_results = self.generate(self.eval_gen_dataloader, global_step)
+                if self.strategy.is_rank_0():
+                    with open(get_next_eval_gen_file(), 'w') as f:
+                        json.dump(generated_results, f, indent=4)
+
         # save ckpt
         # TODO: save best model on dev, use loss/perplexity on whole dev dataset as metric
         if global_step % args.save_steps == 0:
@@ -228,9 +264,95 @@ class SFTTrainer(ABC):
                 self.model.model, args.ckpt_path, tag, args.max_ckpt_num, args.max_ckpt_mem, client_states
             )
 
+    def generate(self, eval_gen_dataloader, steps=0):
+        """生成文本的独立函数
+        
+        Args:
+            eval_dataloader: 评估数据集的dataloader
+            steps: 当前的训练步数
+            
+        Returns:
+            generated_results: 按原始数据集顺序排列的生成结果列表
+        """
+        self.model.eval()
+        
+        indexed_results = []
+        
+        pbar = tqdm(
+            eval_gen_dataloader,
+            desc="Generate stage of steps %d" % steps,
+            disable=not self.strategy.is_rank_0(),
+        )
+
+        def tokenize_fn(texts):
+            assert self.eval_gen_tokenizer is not None
+            batch = self.eval_gen_tokenizer(
+                texts,
+                return_tensors="pt",
+                add_special_tokens=False,
+                max_length=2048,
+                padding=True,
+                truncation=True,
+            )
+            return {k: v.to(torch.cuda.current_device()) for k, v in batch.items()}
+
+        with torch.no_grad():
+            for micro_batch_idx, prompts in enumerate(pbar):
+                # 获取当前batch的全局索引
+                batch_size = len(prompts)
+                rank = dist.get_rank() if dist.is_initialized() else 0
+                world_size = dist.get_world_size() if dist.is_initialized() else 1
+                base_idx = micro_batch_idx * self.args.micro_train_batch_size * world_size + rank
+                batch_indices = [base_idx + i * world_size for i in range(batch_size)]
+                
+
+                inputs = tokenize_fn(prompts)
+
+                # 生成文本
+                generate_kwargs = {
+                    "max_new_tokens": 1024,  # 可配置参数
+                    "do_sample": True,
+                    "top_p": 1.0,
+                    "temperature": 1.0,
+                    "early_stopping": False,
+                    "num_beams": 2,
+                    "pad_token_id": self.eval_gen_tokenizer.pad_token_id,
+                    "eos_token_id": self.eval_gen_tokenizer.eos_token_id,
+                }
+                generated_tokens = self.model.model.generate(
+                    **inputs,
+                    **generate_kwargs
+                )
+
+                input_length = inputs["input_ids"].shape[1]
+                responses = self.eval_gen_tokenizer.batch_decode(generated_tokens[:, input_length:], skip_special_tokens=True)
+
+                for response, global_idx in zip(responses, batch_indices):
+                    indexed_results.append((global_idx, response))
+
+        # 收集所有GPU的结果
+        if dist.is_initialized():
+            gathered_results = [None] * dist.get_world_size()
+            dist.all_gather_object(gathered_results, indexed_results)
+            # 展平并按原始索引排序
+            all_results = []
+            for process_results in gathered_results:
+                all_results.extend(process_results)
+            all_results.sort(key=lambda x: x[0])  # 按索引排序
+            generated_results = [text for _, text in all_results]  # 只保留文本部分
+        else:
+            # 非分布式情况
+            indexed_results.sort(key=lambda x: x[0])
+            generated_results = [text for _, text in indexed_results]
+        
+        self.model.train()
+        return generated_results
+
     def evaluate(self, eval_dataloader, steps=0):
+        """评估函数：计算loss并生成文本"""
         times = 0
         self.model.eval()
+        
         with torch.no_grad():
             loss_sum = 0
             step_bar = tqdm(
@@ -239,6 +361,7 @@ class SFTTrainer(ABC):
                 disable=not self.strategy.is_rank_0(),
             )
 
+            # 计算loss
             for prompt_id_lens, inputs, attention_masks, infos in eval_dataloader:
                 if self.packing_samples:
                     inputs = inputs.to(torch.cuda.current_device())
@@ -276,7 +399,6 @@ class SFTTrainer(ABC):
                             label[:source_len] = self.loss_fn.IGNORE_INDEX
 
                 loss = self.loss_fn(output.logits, labels)
-
                 times += 1
                 loss_sum += loss.item()
                 bar_dict = {"eval gpt_loss": loss_sum / times}
@@ -291,5 +413,5 @@ class SFTTrainer(ABC):
                 elif self._tensorboard is not None:
                     for k, v in logs.items():
                         self._tensorboard.add_scalar(f"eval/{k}", v, steps)
+               
         self.model.train()  # reset model state
-        

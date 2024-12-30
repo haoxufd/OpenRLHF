@@ -8,13 +8,17 @@ from .utils import zero_pad_sequences
 
 
 def preprocess_data(data, input_template=None, input_key="input", output_key=None, apply_chat_template=None):
+    with open("xuhao/verify/data/input/verification_system_message.txt", 'r') as f:
+        system_message = f.read()
+
     if apply_chat_template:
         if output_key:
             prompt_message = data[input_key]
             response_message = data[output_key]
 
             if isinstance(prompt_message, str) and isinstance(response_message, str):
-                prompt_message = [{"role": "user", "content": prompt_message}]
+                system_message = [{"role": "system", "content": system_message}]
+                prompt_message = system_message + [{"role": "user", "content": prompt_message}]
                 response_message = [{"role": "assistant", "content": response_message}]
 
             prompt = apply_chat_template(prompt_message, tokenize=False, add_generation_prompt=True)

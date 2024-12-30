@@ -1,18 +1,30 @@
 from torch.utils.data import Dataset
 from tqdm import tqdm
+import json
 
 
 def preprocess_data(data, input_template=None, input_key="input", apply_chat_template=None) -> str:
+    with open("/root/OpenRLHF/xuhao/verification_system_message.txt", 'r') as f:
+        verification_system_message = f.read()
+    
+    with open("/root/OpenRLHF/xuhao/verification_few_shot.json", 'r') as f:
+        few_shot_examples = json.load(f)
+
+    data = data[input_key]
     if apply_chat_template:
-        chat = data[input_key]
-        if isinstance(chat, str):
-            chat = [{"role": "user", "content": chat}]
-        prompt = apply_chat_template(chat, tokenize=False, add_generation_prompt=True)
+        if isinstance(data, str):
+            chat = [{"role": "system", "content": verification_system_message}]
+            for example in few_shot_examples:
+                chat.append({"role": "user", "content": example["input"]})
+                chat.append({"role": "assistant", "content": example["output"]})
+            chat.append({"role": "user", "content": data})
+            prompt = apply_chat_template(chat, tokenize=False, add_generation_prompt=True)
+            return prompt
     else:
         prompt = data[input_key]
         if input_template:
             prompt = input_template.format(prompt)
-    return prompt
+        return prompt
 
 
 class PromptDataset(Dataset):
