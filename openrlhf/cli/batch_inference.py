@@ -72,16 +72,17 @@ def batch_generate(args):
 
     dist.barrier()
     N = args.best_of_n
-    output_dataset = []
 
-    for prompts in pbar:
-        templated_questions = prompts[0]
-        # Conditional SFT inference
-        if args.enable_csft:
-            for i in range(len(templated_questions)):
-                templated_questions += args.csft_prompt.strip() + " "
-
-        inputs = tokenize_fn(templated_questions)
+    # 添加一个列表来存储索引
+    indexed_outputs = []
+    
+    # 在数据加载时记录全局索引
+    for batch_idx, prompts in enumerate(pbar):
+        # 计算当前批次中样本的全局索引
+        start_idx = batch_idx * args.micro_batch_size * dist.get_world_size() + dist.get_rank() * args.micro_batch_size
+        batch_indices = list(range(start_idx, start_idx + len(prompts)))
+        
+        inputs = tokenize_fn(prompts)
         for _ in range(N):
             outputs = model.model.generate(
                 **inputs,
@@ -90,7 +91,7 @@ def batch_generate(args):
                 do_sample=not args.greedy_sampling,
                 top_p=args.top_p,
                 early_stopping=False,
-                num_beams=4,
+                num_beams=2,
                 temperature=args.temperature,
                 repetition_penalty=args.repetition_penalty,
                 pad_token_id=tokenizer.pad_token_id,
@@ -98,33 +99,38 @@ def batch_generate(args):
             )
             input_length = inputs["input_ids"].shape[1]
             outputs = tokenizer.batch_decode(outputs[:, input_length:], skip_special_tokens=True)
-            for i in range(len(outputs)):
-                output_dataset.append(
-                    {"question": prompts[2][i], 
-                     "reference answer": prompts[1][i],
-                     "answer": outputs[i]})
+            for i, output in enumerate(outputs):
+                # 保存索引和输出的对应关系
+                indexed_outputs.append((batch_indices[i], output))
 
-        dist.barrier()
-
+    # 将带索引的结果写入文件
     with jsonlines.open(args.output_path + str(strategy.get_rank()), mode="w") as writer:
-        writer.write_all(output_dataset)
+        writer.write_all(indexed_outputs)
 
-    # wait unitl all processes generate done
     dist.barrier()
 
-    # concate multiple output files in rank 0
+    # 在 rank 0 进程中合并并排序结果
     if strategy.is_rank_0():
-        output_dataset = []
+        all_outputs = []
         world_size = dist.get_world_size()
         files = [args.output_path + str(rank) for rank in range(world_size)]
+        
+        # 收集所有结果
         for file in files:
             with jsonlines.open(file, mode="r") as reader:
                 for obj in reader:
-                    output_dataset.append(obj)
+                    all_outputs.append(obj)
             os.remove(file)
-
+        
+        # 按原始索引排序
+        all_outputs.sort(key=lambda x: x[0])
+        
+        # 只保存排序后的输出结果
+        sorted_outputs = [output for _, output in all_outputs]
+        
+        # 写入最终结果
         with jsonlines.open(args.output_path, mode="w") as writer:
-            writer.write_all(output_dataset)
+            writer.write_all(sorted_outputs)
 
 
 if __name__ == "__main__":
@@ -141,16 +147,16 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=1234)
 
     # Models
-    parser.add_argument("--pretrain", type=str, default="meta-llama/Llama-3.1-8B-Instruct", help="HF pretrain model name or path")
+    parser.add_argument("--pretrain", type=str, default="/mnt/data/models/pretrain_models/Meta-Llama-3.1/Meta-Llama-3.1-8B-Instruct", help="HF pretrain model name or path")
     parser.add_argument(
         "--value_head_prefix", type=str, default="value_head", help="value_head prefix for Reward Model"
     )
 
     # Custom dataset
-    parser.add_argument("--dataset", type=str, default="openai/gsm8k")
+    parser.add_argument("--dataset", type=str, default="/root/OpenRLHF/xuhao/verification_dataset.json")
     parser.add_argument("--dataset_probs", type=str, default="1.0")
     parser.add_argument("--dataset_split", type=str, default="train")
-    parser.add_argument("--input_key", type=str, default="question", help="JSON dataset key")
+    parser.add_argument("--input_key", type=str, default="input", help="JSON dataset key")
     parser.add_argument("--output_key", type=str, default="answer", help="JSON dataset key")
     parser.add_argument(
         "--apply_chat_template", action="store_true", default=True, help="HF tokenizer apply_chat_template"
@@ -158,11 +164,11 @@ if __name__ == "__main__":
     parser.add_argument("--input_template", type=str, default=None)
     parser.add_argument("--max_len", type=int, default=2048, help="Max tokens for the samples")
     parser.add_argument("--max_samples", type=int, default=1e8, help="Max number of samples")
-    parser.add_argument("--output_path", type=str, default="/home/user/OpenRLHF/xuhao/result.txt", help="Output JSON data path")
+    parser.add_argument("--output_path", type=str, default="/root/OpenRLHF/xuhao/verification_result.txt", help="Output JSON data path")
 
     # For generation
-    parser.add_argument("--prompt_max_len", type=int, default=1024, help="Max tokens for prompt")
-    parser.add_argument("--max_new_tokens", type=int, default=1024, help="Max new tokens in generation")
+    parser.add_argument("--prompt_max_len", type=int, default=4096, help="Max tokens for prompt")
+    parser.add_argument("--max_new_tokens", type=int, default=512, help="Max new tokens in generation")
     parser.add_argument("--greedy_sampling", action="store_true", default=False, help="Use Greedy sampling")
     parser.add_argument("--top_p", type=float, default=1.0, help="top_p for Sampling")
     parser.add_argument("--temperature", type=float, default=1.0, help="temperature for Sampling")

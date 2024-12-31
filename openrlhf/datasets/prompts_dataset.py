@@ -4,20 +4,19 @@ import json
 
 
 def preprocess_data(data, input_template=None, input_key="input", apply_chat_template=None) -> str:
-    with open("/home/user/OpenRLHF/xuhao/solution_system_message.txt", 'r') as f:
-        solution_system_message = f.read()
+    with open("/root/OpenRLHF/xuhao/verification_system_message.txt", 'r') as f:
+        verification_system_message = f.read()
     
-    with open("/home/user/OpenRLHF/xuhao/solution_few_shot.json", 'r') as f:
+    with open("/root/OpenRLHF/xuhao/verification_few_shot.json", 'r') as f:
         few_shot = json.load(f)
 
     if apply_chat_template:
-        chat = data[input_key]
-        if isinstance(chat, str):
-            chat = [{"role": "system", "content": solution_system_message}]
+        if isinstance(data, str):
+            chat = [{"role": "system", "content": verification_system_message}]
             for fs in few_shot:
-                chat.append({"role": "user", "content": fs["question"]})
-                chat.append({"role": "assistant", "content": fs["answer"]})
-            chat.append({"role": "user", "content": data[input_key]})
+                chat.append({"role": "user", "content": fs["input"]})
+                chat.append({"role": "assistant", "content": fs["output"]})
+            chat.append({"role": "user", "content": data})
         prompt = apply_chat_template(chat, tokenize=False, add_generation_prompt=True)
     else:
         prompt = data[input_key]
@@ -57,8 +56,9 @@ class PromptDataset(Dataset):
 
         self.prompts = []
         for data in tqdm(dataset, desc="Preprocessing data", disable=not self.strategy.is_rank_0()):
-            prompt = preprocess_data(data, input_template, input_key, apply_chat_template)
-            self.prompts.append((prompt, data["answer"], data["question"]))
+            for dt in data[input_key]:
+                prompt = preprocess_data(dt, input_template, input_key, apply_chat_template)
+                self.prompts.append(prompt)
 
     def __len__(self):
         length = len(self.prompts)
