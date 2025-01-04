@@ -198,5 +198,5 @@ def postprocess_verification_result(num_problem=1e8):
         json.dump(result, f, indent=4)
 
 if __name__ == "__main__":
-    # generate_verification_label_plevel()
+    generate_verification_label_plevel()
     print(get_verification_accuracy_plevel())

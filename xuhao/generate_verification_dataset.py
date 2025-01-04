@@ -77,7 +77,7 @@ def gen_answer_label():
             # reference answer may take the form as "10,800"
             ref_answer = re.findall(r'#### ([+-]?[\d,]*\.?[\d,]+)', obj["reference answer"])
             ref_answer[0] = ref_answer[0].replace(',', '')
-            answer = re.findall(r'#### ([+-]?\d*\.?\d+)', obj["answer"])
+            answer = re.findall(r'#### ([+-]?[\d,]*\.?[\d,]+)', obj["answer"])
 
             assert len(ref_answer) == 1
             assert len(answer) < 2
@@ -88,6 +88,7 @@ def gen_answer_label():
                 answer_label.append(False)
             else:
                 # length = 1
+                answer[0] = answer[0].replace(',', '')
                 answer_label.append(float(ref_answer[0]) == float(answer[0]))
     
     with open("xuhao/answer_label.json", 'w', encoding="utf-8") as f:
