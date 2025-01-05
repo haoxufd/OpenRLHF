@@ -3,7 +3,7 @@ from openai import OpenAI
 
 client = OpenAI(
     base_url='https://api.feidaapi.com/v1',
-    api_key="sk-1yEaKgqZb1mj1jE6MxfxHioGyKAVbimZzGpcu4VT3CHiMED4"
+    api_key="sk-rHxzHQ3cr9UIqufjXfiRqhW5OMd7GKd7YY1CS7CCYtpvEgE5"
 )
 
 def gpt_generate(messages):
@@ -13,7 +13,7 @@ def gpt_generate(messages):
         messages=messages)
     return completion.choices[0].message.content.strip()
 
-def generate_verification_result_gpt(num_problems=1e8, num_few_shots=3, save_batch=5):
+def generate_verification_result_gpt(num_problems=1e8, num_few_shots=1, save_batch=10):
     with open("xuhao/verification_dataset.json", 'r') as f:
         verification_data = json.load(f)
     with open("xuhao/verification_system_message.txt", 'r') as f:
@@ -64,4 +64,4 @@ def generate_verification_result_gpt(num_problems=1e8, num_few_shots=3, save_bat
         json.dump(result, f, indent=4)
 
 if __name__ == "__main__":
-    generate_verification_result_gpt(1)
+    generate_verification_result_gpt()

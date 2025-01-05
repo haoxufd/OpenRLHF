@@ -137,6 +137,19 @@ def train(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+
+    pretrain = "/mnt/data/models/pretrain_models/Meta-Llama-3.1/Meta-Llama-3.1-8B-Instruct"
+    max_samples = 1
+    dataset = "/root/OpenRLHF/xuhao/sft/data"
+    load_checkpoint = True
+    max_epoches = 1
+    input_key = "input"
+    output_key = "output"
+
+    micro_train_batch_size = 1
+    train_batch_size = 1
+
+
     # Checkpoint
     parser.add_argument("--save_path", type=str, default="./ckpt")
     parser.add_argument("--save_steps", type=int, default=-1)
@@ -145,11 +158,11 @@ if __name__ == "__main__":
     parser.add_argument("--ckpt_path", type=str, default="./ckpt/checkpoints_sft")
     parser.add_argument("--max_ckpt_num", type=int, default=3)
     parser.add_argument("--max_ckpt_mem", type=int, default=1e8)
-    parser.add_argument("--load_checkpoint", action="store_true", default=False)
+    parser.add_argument("--load_checkpoint", action="store_true", default=load_checkpoint)
 
     # DeepSpeed
-    parser.add_argument("--micro_train_batch_size", type=int, default=8, help="batch size per GPU")
-    parser.add_argument("--train_batch_size", type=int, default=128, help="Global training batch size")
+    parser.add_argument("--micro_train_batch_size", type=int, default=micro_train_batch_size, help="batch size per GPU")
+    parser.add_argument("--train_batch_size", type=int, default=train_batch_size, help="Global training batch size")
     parser.add_argument("--max_norm", type=float, default=1.0, help="Gradient clipping")
     parser.add_argument("--gradient_checkpointing", action="store_true", default=False)
     parser.add_argument("--seed", type=int, default=42)
@@ -165,9 +178,9 @@ if __name__ == "__main__":
     parser.add_argument("--disable_fast_tokenizer", action="store_true", default=False)
 
     # SFT
-    parser.add_argument("--max_epochs", type=int, default=2)
+    parser.add_argument("--max_epochs", type=int, default=max_epoches)
     parser.add_argument("--aux_loss_coef", type=float, default=0, help="MoE balancing loss")
-    parser.add_argument("--pretrain", type=str, default=None)
+    parser.add_argument("--pretrain", type=str, default=pretrain)
     parser.add_argument("--learning_rate", type=float, default=5e-6)
     parser.add_argument("--lr_warmup_ratio", type=float, default=0.03)
     parser.add_argument("--pretrain_mode", action="store_true", default=False, help="Use pretrain loss")
@@ -197,19 +210,19 @@ if __name__ == "__main__":
     parser.add_argument("--packing_samples", action="store_true", default=False)
 
     # custom dataset
-    parser.add_argument("--dataset", type=str, default=None)
+    parser.add_argument("--dataset", type=str, default=dataset)
     parser.add_argument("--dataset_probs", type=str, default="1.0", help="sampling probs for datasets")
     parser.add_argument("--train_split", type=str, default="train", help="train split of the HF dataset")
     parser.add_argument("--eval_split", type=str, default="test", help="test split of the dataset")
 
-    parser.add_argument("--input_key", type=str, default="input", help="JSON dataset key")
-    parser.add_argument("--output_key", type=str, default=None, help="JSON dataset key")
+    parser.add_argument("--input_key", type=str, default=input_key, help="JSON dataset key")
+    parser.add_argument("--output_key", type=str, default=output_key, help="JSON dataset key")
     parser.add_argument("--input_template", type=str, default="User: {}\nAssistant: ")
     parser.add_argument(
-        "--apply_chat_template", action="store_true", default=False, help="Use HF tokenizer chat template"
+        "--apply_chat_template", action="store_true", default=True, help="Use HF tokenizer chat template"
     )
     parser.add_argument("--tokenizer_chat_template", type=str, default=None)
-    parser.add_argument("--max_samples", type=int, default=1e8, help="Max number of samples")
+    parser.add_argument("--max_samples", type=int, default=max_samples, help="Max number of samples")
     parser.add_argument("--max_len", type=int, default=2048, help="Max tokens for the samples")
 
     # wandb parameters
