@@ -140,7 +140,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     pretrain = "/mnt/data/models/pretrain_models/Meta-Llama-3.1/Meta-Llama-3.1-8B"
-    max_samples = 500
+    max_samples = 1e8
     dataset = "/root/OpenRLHF/xuhao/sft/data"
     load_checkpoint = True
     max_epoches = 2
@@ -148,7 +148,7 @@ if __name__ == "__main__":
     output_key = "output"
 
     micro_train_batch_size = 8
-    train_batch_size = 128
+    train_batch_size = 224
 
 
     # Checkpoint
@@ -227,7 +227,7 @@ if __name__ == "__main__":
     parser.add_argument("--max_len", type=int, default=2048, help="Max tokens for the samples")
 
     # wandb parameters
-    parser.add_argument("--use_wandb", type=str, default=None)
+    parser.add_argument("--use_wandb", type=str, default=True)
     parser.add_argument("--wandb_org", type=str, default=None)
     parser.add_argument("--wandb_group", type=str, default=None)
     parser.add_argument("--wandb_project", type=str, default="openrlhf_train_sft")

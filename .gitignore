@@ -150,5 +150,7 @@ core
 *test_scripts*
 */checkpoint/*
 
-xuhao/sft/data
+xuhao/sft/data/
 ckpt/
+
+wandb/

@@ -17,7 +17,18 @@ def generate_problem_desc():
         json.dump(desc, f, indent=4)
 
 def main():
-    pass
+    with open("xuhao/solution_dataset.txt", 'r') as f:
+        solution_data = f.readlines()
+    
+    result = []
+    for idx, data in enumerate(solution_data):
+        dict_data = {"index": idx}
+        for k, v in json.loads(data).items():
+            dict_data[k] = v
+        result.append(dict_data)
+
+    with open("xuhao/solution_dataset.json", 'w') as f:
+        json.dump(result, f, indent=4)
 
 if __name__ == "__main__":
-    generate_problem_desc()
+    main()

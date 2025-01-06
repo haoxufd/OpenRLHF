@@ -81,6 +81,9 @@ def batch_generate(args):
         # 计算当前批次中样本的全局索引
         start_idx = batch_idx * args.micro_batch_size * dist.get_world_size() + dist.get_rank() * args.micro_batch_size
         batch_indices = list(range(start_idx, start_idx + len(prompts)))
+
+        print("Rank: ", dist.get_rank(), "\nWorld Size: ", dist.get_world_size())
+        print("Length of Prompts: ", len(prompts), "\nStart Index: ", start_idx)
         
         inputs = tokenize_fn(prompts)
         for _ in range(N):
@@ -131,9 +134,16 @@ def batch_generate(args):
         # 写入最终结果
         with jsonlines.open(args.output_path, mode="w") as writer:
             writer.write_all(sorted_outputs)
+        
+
 
 
 if __name__ == "__main__":
+    pretrain = "ckpt"
+    verification_dataset_file = "/root/OpenRLHF/xuhao/verification_dataset.json"
+    verification_result_file = "/root/OpenRLHF/xuhao/llama-3.1-8b-sft_verification_result.json"
+    max_samples = 1
+
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--eval_task", type=str, default="generate", help="Set to generate_vllm, generate (HF generate) or rm"
@@ -147,24 +157,24 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=1234)
 
     # Models
-    parser.add_argument("--pretrain", type=str, default="/mnt/data/models/pretrain_models/Meta-Llama-3.1/Meta-Llama-3.1-8B-Instruct", help="HF pretrain model name or path")
+    parser.add_argument("--pretrain", type=str, default=pretrain, help="HF pretrain model name or path")
     parser.add_argument(
         "--value_head_prefix", type=str, default="value_head", help="value_head prefix for Reward Model"
     )
 
     # Custom dataset
-    parser.add_argument("--dataset", type=str, default="/root/OpenRLHF/xuhao/verification_dataset.json")
+    parser.add_argument("--dataset", type=str, default=verification_dataset_file)
     parser.add_argument("--dataset_probs", type=str, default="1.0")
-    parser.add_argument("--dataset_split", type=str, default="train")
-    parser.add_argument("--input_key", type=str, default="input", help="JSON dataset key")
-    parser.add_argument("--output_key", type=str, default="answer", help="JSON dataset key")
+    parser.add_argument("--dataset_split", type=str, default=None)
+    parser.add_argument("--input_key", type=str, default="verification_input", help="JSON dataset key")
+    parser.add_argument("--output_key", type=str, default=None, help="JSON dataset key")
     parser.add_argument(
         "--apply_chat_template", action="store_true", default=True, help="HF tokenizer apply_chat_template"
     )
     parser.add_argument("--input_template", type=str, default=None)
     parser.add_argument("--max_len", type=int, default=2048, help="Max tokens for the samples")
-    parser.add_argument("--max_samples", type=int, default=1e8, help="Max number of samples")
-    parser.add_argument("--output_path", type=str, default="/root/OpenRLHF/xuhao/verification_result.txt", help="Output JSON data path")
+    parser.add_argument("--max_samples", type=int, default=max_samples, help="Max number of samples")
+    parser.add_argument("--output_path", type=str, default=verification_result_file, help="Output JSON data path")
 
     # For generation
     parser.add_argument("--prompt_max_len", type=int, default=4096, help="Max tokens for prompt")

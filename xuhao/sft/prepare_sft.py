@@ -2,11 +2,11 @@ import json
 
 from datasets import Dataset, DatasetDict
 
-claude_verification_result_file = "xuhao/claude_verification_result_small.json"
+claude_verification_result_file = "xuhao/claude_verification_result.json"
 verification_dataset_file = "xuhao/verification_dataset.json"
 sft_dataset_file = "xuhao/sft/sft_data.json"
 
-def prepare_sft_dataset(train_test_ratio=9):
+def prepare_sft_dataset(train_test_ratio=24):
     data = []
     with open(claude_verification_result_file, 'r') as f:
         claude_verification_result = json.load(f)
@@ -69,8 +69,6 @@ def convert_dataset_format():
     
     return dataset_dict
 
-# 调用函数
-dataset = convert_dataset_format()
-
 if __name__ == "__main__":
+    prepare_sft_dataset()
     convert_dataset_format()

@@ -8,14 +8,14 @@ def preprocess_data(data, input_template=None, input_key="input", apply_chat_tem
         verification_system_message = f.read()
     
     with open("/root/OpenRLHF/xuhao/verification_few_shot.json", 'r') as f:
-        few_shot = json.load(f)
+        few_shot_examples = json.load(f)
 
     if apply_chat_template:
         if isinstance(data, str):
             chat = [{"role": "system", "content": verification_system_message}]
-            for fs in few_shot:
-                chat.append({"role": "user", "content": fs["input"]})
-                chat.append({"role": "assistant", "content": fs["output"]})
+            for example in few_shot_examples:
+                chat.append({"role": "user", "content": example["input"]})
+                chat.append({"role": "assistant", "content": example["output"]})
             chat.append({"role": "user", "content": data})
         prompt = apply_chat_template(chat, tokenize=False, add_generation_prompt=True)
     else:
