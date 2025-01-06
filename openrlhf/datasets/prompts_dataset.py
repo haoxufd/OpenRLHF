@@ -10,6 +10,7 @@ def preprocess_data(data, input_template=None, input_key="input", apply_chat_tem
     with open("/root/OpenRLHF/xuhao/verification_few_shot.json", 'r') as f:
         few_shot_examples = json.load(f)
 
+    data = data[input_key]
     if apply_chat_template:
         if isinstance(data, str):
             chat = [{"role": "system", "content": verification_system_message}]
@@ -17,12 +18,13 @@ def preprocess_data(data, input_template=None, input_key="input", apply_chat_tem
                 chat.append({"role": "user", "content": example["input"]})
                 chat.append({"role": "assistant", "content": example["output"]})
             chat.append({"role": "user", "content": data})
-        prompt = apply_chat_template(chat, tokenize=False, add_generation_prompt=True)
+            prompt = apply_chat_template(chat, tokenize=False, add_generation_prompt=True)
+            return prompt
     else:
         prompt = data[input_key]
         if input_template:
             prompt = input_template.format(prompt)
-    return prompt
+        return prompt
 
 
 class PromptDataset(Dataset):
@@ -56,9 +58,8 @@ class PromptDataset(Dataset):
 
         self.prompts = []
         for data in tqdm(dataset, desc="Preprocessing data", disable=not self.strategy.is_rank_0()):
-            for dt in data[input_key]:
-                prompt = preprocess_data(dt, input_template, input_key, apply_chat_template)
-                self.prompts.append(prompt)
+            prompt = preprocess_data(data, input_template, input_key, apply_chat_template)
+            self.prompts.append(prompt)
 
     def __len__(self):
         length = len(self.prompts)

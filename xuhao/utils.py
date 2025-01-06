@@ -17,18 +17,18 @@ def generate_problem_desc():
         json.dump(desc, f, indent=4)
 
 def main():
-    with open("xuhao/solution_dataset.txt", 'r') as f:
-        solution_data = f.readlines()
+    with open("xuhao/verification_dataset.json", 'r') as f:
+        verification_data = json.load(f)
     
     result = []
-    for idx, data in enumerate(solution_data):
-        dict_data = {"index": idx}
-        for k, v in json.loads(data).items():
-            dict_data[k] = v
-        result.append(dict_data)
 
-    with open("xuhao/solution_dataset.json", 'w') as f:
+    for data in verification_data:
+        if data["problem index"] >= 7162:
+            result.append(data)
+    
+    with open("xuhao/verification_dataset_eval.json", 'w') as f:
         json.dump(result, f, indent=4)
+
 
 if __name__ == "__main__":
     main()

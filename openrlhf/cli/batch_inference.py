@@ -139,10 +139,10 @@ def batch_generate(args):
 
 
 if __name__ == "__main__":
-    pretrain = "ckpt"
-    verification_dataset_file = "/root/OpenRLHF/xuhao/verification_dataset.json"
-    verification_result_file = "/root/OpenRLHF/xuhao/llama-3.1-8b-sft_verification_result.json"
-    max_samples = 1
+    pretrain = "/mnt/data/user/zhao_jun/xuhao/ckpt"
+    verification_dataset_file = "/root/OpenRLHF/xuhao/verification_dataset_eval.json"
+    verification_result_file = "/root/OpenRLHF/xuhao/llama-3.1-8b-sft_verification_result_eval.json"
+    max_samples = 1e8
 
     parser = argparse.ArgumentParser()
     parser.add_argument(
