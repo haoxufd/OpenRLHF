@@ -27,8 +27,8 @@ def preprocess_data(data, input_key, apply_chat_template) -> str:
     data = data[input_key]
     messages = [{"role": "system", "content": system_message}]
     for example in few_shot_examples:
-        messages.append({"role": "user", "content": example["input"]})
-        messages.append({"role": "assistant", "content": example["output"]})
+        messages.append({"role": "user", "content": example["problem"]})
+        messages.append({"role": "assistant", "content": example["solution"]})
     messages.append({"role": "user", "content": data})
     prompt = apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
 
@@ -151,7 +151,7 @@ def batch_generate(args):
                 do_sample=not args.greedy_sampling,
                 top_p=args.top_p,
                 early_stopping=False,
-                num_beams=4,
+                num_beams=2,
                 temperature=args.temperature,
                 repetition_penalty=args.repetition_penalty,
                 pad_token_id=tokenizer.pad_token_id,
@@ -206,9 +206,10 @@ if __name__ == "__main__":
     input_key = "question"
     max_samples = 10
     output_path = "/root/OpenRLHF/xuhao/solve/data/output/solution_test.json"
-    prompt_max_length = 2048
+    prompt_max_length = 1024
     max_new_tokens = 1024
 
+    torch.cuda.empty_cache()
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--eval_task", type=str, default="generate", help="Set to generate_vllm, generate (HF generate) or rm"
