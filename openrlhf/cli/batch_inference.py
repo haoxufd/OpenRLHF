@@ -82,8 +82,8 @@ def batch_generate(args):
         start_idx = batch_idx * args.micro_batch_size * dist.get_world_size() + dist.get_rank() * args.micro_batch_size
         batch_indices = list(range(start_idx, start_idx + len(prompts)))
 
-        print("Rank: ", dist.get_rank(), "\nWorld Size: ", dist.get_world_size())
-        print("Length of Prompts: ", len(prompts), "\nStart Index: ", start_idx)
+        # print("Rank: ", dist.get_rank(), "\nWorld Size: ", dist.get_world_size())
+        # print("Length of Prompts: ", len(prompts), "\nStart Index: ", start_idx)
         
         inputs = tokenize_fn(prompts)
         for _ in range(N):

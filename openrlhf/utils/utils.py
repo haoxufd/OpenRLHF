@@ -83,13 +83,13 @@ def blending_datasets(
             strategy.print(f"loaded {dataset} from disk")
         # remote/local folder or common file
         else:
-            data = load_dataset(dataset, "main", data_dir=data_dir)
+            data = load_dataset(dataset, data_dir=data_dir)
             strategy.print(f"loaded {dataset} from files")
 
         if train_split and train_split in data:
             train_data = data[train_split].select(range(min(max_count, len(data[train_split]))))
         else:
-            train_data = data["train"].select(range(min(max_count, len(data["train"]))))
+            train_data = data.select(range(min(max_count, len(data))))
         train_data_list.append(train_data)
 
         if return_eval:
