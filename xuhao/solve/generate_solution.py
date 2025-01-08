@@ -194,19 +194,19 @@ def batch_generate(args):
             result.append({
                 "index": idx,
                 "problem": data["question"],
-                "reference_solution": data["reference_answer"],
+                "reference_solution": data["answer"],
                 "solution": sorted_outputs[idx]
             })
-        with open(args.output_pathm, 'w') as f:
+        with open(args.output_path, 'w') as f:
             json.dump(result, f, indent=4)
 
 if __name__ == "__main__":
     pretrain = "/mnt/data/models/pretrain_models/Meta-Llama-3.1/Meta-Llama-3.1-8B-Instruct"
     dataset = "/root/OpenRLHF/xuhao/solve/data/input/gsm8k_test.json"
     input_key = "question"
-    max_samples = 10
+    max_samples = 1e8
     output_path = "/root/OpenRLHF/xuhao/solve/data/output/solution_test.json"
-    prompt_max_length = 1024
+    prompt_max_length = 2048
     max_new_tokens = 1024
 
     torch.cuda.empty_cache()
