@@ -2,35 +2,54 @@ import json
 
 from datasets import Dataset, DatasetDict
 
-claude_verification_result_file = "xuhao/claude_verification_result.json"
-verification_dataset_file = "xuhao/verification_dataset.json"
-sft_dataset_file = "xuhao/sft/sft_data.json"
+verification_result_file = "xuhao/verify/data/output/verification_result_claude.json"
+verification_result_label_file = "xuhao/verify/data/output/verification_result_label_claude.json"
+verification_data_file = "xuhao/verify/data/input/verification_data.json"
+sft_dataset_file = "xuhao/sft/data/input/sft_data.json"
+
+def get_verification_input(verification_data, problem_index, step_index):
+    for data in verification_data:
+        if data["problem_index"] == problem_index and data["step_index"] == step_index:
+            return data["verification_input"]
 
 def prepare_sft_dataset(train_test_ratio=24):
+    with open(verification_result_file, 'r') as f1, open(verification_data_file, 'r') as f2:
+        verification_result = json.load(f1)
+        verification_data = json.load(f2)
+    with open(verification_result_label_file, 'r') as f:
+        verification_result_label = json.load(f)
+
     data = []
-    with open(claude_verification_result_file, 'r') as f:
-        claude_verification_result = json.load(f)
-    with open(verification_dataset_file, 'r') as f:
-        verification_dataset = json.load(f)
-    
-    for i, verifications_for_a_problem in enumerate(claude_verification_result):
-        for j, verification in enumerate(verifications_for_a_problem):
+    for i in range(len(verification_result)):
+        if verification_result_label[verification_result[i]["problem_index"]]["verification_result_label"]:
+            # verification to this problem is right
+            problem_index = verification_result[i]["problem_index"]
+            step_index = verification_result[i]["step_index"]
             data.append({
-                "problem idx": i,
-                "input": verification_dataset[i]["input"][j],
-                "output": verification
+                "problem_index": problem_index,
+                "step_index": step_index,
+                "input": get_verification_input(verification_data, problem_index, step_index),
+                "output": verification_result[i]["verification_result"]
             })
-            if verification.strip().lower().startswith("evaluation: incorrect"):
-                break
     
     num_train_data = int(len(data) * (train_test_ratio / (train_test_ratio + 1)))
-    num_test_data = len(data) - num_train_data
+
+    # find the problem-problem boundary
+    new_num_train_data = num_train_data
+    for i in range(num_train_data, len(data)):
+        if data[i]["problem_index"] == data[num_train_data - 1]["problem_index"]:
+            new_num_train_data += 1
     
+    num_train_data = new_num_train_data
+    num_test_data = len(data) - num_train_data
+    total = len(data)
+
     final_data = {
         "train": data[:num_train_data],
         "test": data[num_train_data:]
     }
 
+    print(f"Total Data: {total}")
     print(f"Num Train Data: {num_train_data}")
     print(f"Num Test Data: {num_test_data}")
     
@@ -65,7 +84,7 @@ def convert_dataset_format():
     })
 
     # 保存到磁盘
-    dataset_dict.save_to_disk('xuhao/sft/data')
+    dataset_dict.save_to_disk('xuhao/sft/data/input/sft_data')
     
     return dataset_dict
 

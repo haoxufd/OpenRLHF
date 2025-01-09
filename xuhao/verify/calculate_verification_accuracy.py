@@ -1,68 +1,51 @@
 import json
+from itertools import groupby
 
-verification_result_file = "xuhao/llama-3.1-8b-sft_verification_result_eval.json"
-concise_verification_result_file = verification_result_file.replace(".json", "_concise.json")
-verification_label_file = "xuhao/llama-3.1-8b-sft_verification_label_eval.json"
+verification_result_file = "xuhao/verify/data/output/verification_result_claude.json"
+verification_result_label_file = "xuhao/verify/data/output/verification_result_label_claude.json"
+solution_label_file = "xuhao/solve/data/output/solution_label.json"
 
-eval_start_problem = 7162
-
-def extract_concise_verification_result(num_problem=1e8):
+def extract_concise_verification_result():
     with open(verification_result_file, 'r') as f:
         verification_result = json.load(f)
-
-    concise_result = [[x.lower().strip().startswith("evaluation: correct") for x in item] for item in verification_result]
     
-    with open(concise_verification_result_file, 'w') as f:
-        json.dump(concise_result, f, indent=4)
+    grouped_result = [list(group) for key, group in groupby(verification_result, key=lambda x: x["problem_index"])]
 
-def generate_verification_label_plevel(start_idx):
-    result = []
-
-    with open(concise_verification_result_file, 'r') as f:
-        verificaton_result = json.load(f)
-
-    with open("xuhao/answer_label.json", 'r') as f:
-        answer_label = json.load(f)[start_idx:]
+    concise_grouped_result = []
+    for item in grouped_result:
+        tmp = []
+        for data in item:
+            assert data["verification_result"].endswith("Evaluation Result: CORRECT") or data["verification_result"].endswith("Evaluation Result: INCORRECT")
+            tmp.append(data["verification_result"].endswith("Evaluation Result: CORRECT"))
+        concise_grouped_result.append(tmp)
     
-    for idx, label in enumerate(answer_label):
-        result.append(label == all(verificaton_result[idx]))
-    
-    with open(verification_label_file, 'w') as f:
-        json.dump(result, f, indent=4)
+    return concise_grouped_result
 
-def get_verification_accuracy_plevel():
-    with open(verification_label_file, 'r') as f:
-        obj = json.load(f)
+def get_verification_accuracy():
+    concise_verification_result = extract_concise_verification_result()
 
-    cnt = 0
-    for label in obj:
-        if label == True:
-            cnt += 1
-
-    return cnt / len(obj)
-
-def postprocess_verification_result(start_idx):
-    with open("xuhao/llama-3.1-8b-sft_verification_result_eval.txt", 'r') as f:
-        raw_verification_result = f.readlines()
-    
-    tmp = []
-    for line in raw_verification_result:
-        tmp.append(line.strip('\"\n '))
-    
-    with open("xuhao/problem_desc.json", 'r') as f:
-        problem_desc = json.load(f)
+    with open(solution_label_file, 'r') as f:
+        solution_label = json.load(f)
     
     result = []
-
-    acc = 0
-    for desc in problem_desc[start_idx:]:
-        result.append(tmp[acc:acc+desc["num steps"]])
-        acc += desc["num steps"]
+    num_right_verification = 0
+    for idx, label in enumerate(solution_label):
+        verification_result_label = label == all(concise_verification_result[idx])
+        if verification_result_label:
+            num_right_verification += 1
+        result.append({
+            "problem_index": idx,
+            "verification_result_label": verification_result_label
+        })
     
-    with open(verification_result_file, 'w') as f:
+    print("Problem Num: ", len(solution_label))
+    print("Num Right Verification: ", num_right_verification)
+    print("Verification Accuracy: ", num_right_verification / len(solution_label))
+    
+    with open(verification_result_label_file, 'w') as f:
         json.dump(result, f, indent=4)
+    
+    print("Verification result label has been written to ", verification_result_label_file)
 
 if __name__ == "__main__":
-    extract_concise_verification_result()
-    generate_verification_label_plevel(eval_start_problem)
-    print("Acc: ", get_verification_accuracy_plevel())
+    get_verification_accuracy()

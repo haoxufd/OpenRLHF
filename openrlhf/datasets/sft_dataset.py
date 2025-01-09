@@ -8,7 +8,7 @@ from .utils import zero_pad_sequences
 
 
 def preprocess_data(data, input_template=None, input_key="input", output_key=None, apply_chat_template=None):
-    with open("xuhao/verification_system_message.txt", 'r') as f:
+    with open("xuhao/verify/data/input/verification_system_message.txt", 'r') as f:
         system_message = f.read()
 
     if apply_chat_template:

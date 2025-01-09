@@ -14,7 +14,7 @@ Important notes:
 
 There are only two possible evaluations: CORRECT or INCORRECT
 Clearly explain your reasoning before giving the final evaluation
-The whole evaluation should end with "Evaluation Result: CERRECT" or "Evaluation Result: INCERRECT"
+The whole evaluation should end with "Evaluation Result: CORRECT" or "Evaluation Result: INCORRECT"
 Alternative solution paths that are mathematically valid should be marked as CORRECT
 Focus only on mathematical validity and logical consistency with previous steps
 Do not suggest improvements or alternative approaches

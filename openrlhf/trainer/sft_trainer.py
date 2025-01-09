@@ -1,3 +1,4 @@
+import json
 import os
 from abc import ABC
 
@@ -10,6 +11,8 @@ from tqdm import tqdm
 
 from openrlhf.models import GPTLMLoss
 from openrlhf.utils.distributed_sampler import DistributedSampler
+
+import re
 
 
 class SFTTrainer(ABC):
@@ -202,6 +205,27 @@ class SFTTrainer(ABC):
             self._wandb.finish()
         if self._tensorboard is not None and self.strategy.is_rank_0():
             self._tensorboard.close()
+    
+    def get_next_eval_number(self, directory="."):
+        # 获取目录下所有文件
+        files = os.listdir(directory)
+        
+        # 用正则表达式匹配 eval_result_数字.json 的文件
+        pattern = re.compile(r"eval_result_(\d+)\.json$")
+        
+        # 提取所有文件编号
+        numbers = []
+        for file in files:
+            match = pattern.match(file)
+            if match:
+                numbers.append(int(match.group(1)))
+        
+        # 如果没有找到任何匹配的文件，返回 0
+        if not numbers:
+            return 0
+        
+        # 返回最大编号 + 1
+        return max(numbers) + 1
 
     # logs/checkpoints/evaluation
     def save_logs_and_checkpoints(self, args, global_step, step_bar, logs_dict={}, client_states={}):
@@ -219,7 +243,10 @@ class SFTTrainer(ABC):
         if global_step % args.eval_steps == 0:
             # do eval when len(dataloader) > 0, avoid zero division in eval.
             if len(self.eval_dataloader) > 0:
-                self.evaluate(self.eval_dataloader, global_step)
+                predictions = self.evaluate(self.eval_dataloader, global_step)
+                file_name = "xuhao/sft/data/output/eval_result_{}.json".format(self.get_next_eval_number("xuhao/sft/data/output"))
+                with open(file_name, 'w') as f:
+                    json.dump(predictions, f, indent=4)
         # save ckpt
         # TODO: save best model on dev, use loss/perplexity on whole dev dataset as metric
         if global_step % args.save_steps == 0:
@@ -231,6 +258,8 @@ class SFTTrainer(ABC):
     def evaluate(self, eval_dataloader, steps=0):
         times = 0
         self.model.eval()
+        all_predictions = []  # 存储所有预测结果
+        
         with torch.no_grad():
             loss_sum = 0
             step_bar = tqdm(
@@ -258,6 +287,29 @@ class SFTTrainer(ABC):
                         packed_seq_lens=infos["input_length"],
                     )
                     
+                # 获取预测结果
+                logits = output.logits
+                predictions = torch.argmax(logits, dim=-1)  # [batch_size, seq_len]
+                
+                # 对于每个样本，提取非padding部分的预测结果
+                batch_predictions = []
+                if self.packing_samples:
+                    index = 0
+                    for input_length in infos["input_length"]:
+                        pred = predictions[0, index:index + input_length]
+                        text = self.tokenizer.decode(pred.cpu().tolist(), skip_special_tokens=True)
+                        batch_predictions.append(text)
+                        index += input_length
+                else:
+                    for pred, mask in zip(predictions, attention_mask):
+                        # 只取attention mask为1的部分
+                        valid_pred = pred[mask.bool()]
+                        text = self.tokenizer.decode(valid_pred.cpu().tolist(), skip_special_tokens=False)
+                        batch_predictions.append(text)
+                
+                # 收集当前batch的预测结果
+                all_predictions.extend(batch_predictions)
+                    
                 # loss function
                 labels = torch.where(
                     attention_mask.bool(),
@@ -284,6 +336,24 @@ class SFTTrainer(ABC):
                 logs = self.strategy.all_reduce(bar_dict)
                 step_bar.set_postfix(logs)
 
+            # 在分布式环境中收集所有GPU上的预测结果
+            if dist.is_initialized():
+                # 首先收集每个进程的预测数量
+                local_count = torch.tensor(len(all_predictions), device=torch.cuda.current_device())
+                all_counts = [torch.zeros_like(local_count) for _ in range(dist.get_world_size())]
+                dist.all_gather(all_counts, local_count)
+                
+                # 然后收集预测结果
+                predictions_gathered = []
+                for i in range(dist.get_world_size()):
+                    if i == dist.get_rank():
+                        predictions_gathered.extend(all_predictions)
+                    else:
+                        predictions_gathered.extend([''] * int(all_counts[i].item()))
+                    dist.barrier()  # 确保进程同步
+            else:
+                predictions_gathered = all_predictions
+
             if self.strategy.is_rank_0():
                 if self._wandb is not None:
                     logs = {"eval/%s" % k: v for k, v in {**logs, "global_step": steps}.items()}
@@ -291,5 +361,6 @@ class SFTTrainer(ABC):
                 elif self._tensorboard is not None:
                     for k, v in logs.items():
                         self._tensorboard.add_scalar(f"eval/{k}", v, steps)
+                        
         self.model.train()  # reset model state
-        
+        return predictions_gathered  # 返回所有预测结果

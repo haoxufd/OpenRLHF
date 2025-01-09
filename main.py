@@ -27,16 +27,23 @@ def find_duplicate_questions(data):
     return duplicate_pairs
 
 if __name__ == "__main__":
-    with open("xuhao/verify/data/output/verification_result_all_claude.json", 'r') as f:
-       result = json.load(f)
+    with open("xuhao/verify/data/output/verification_result_train_claude.json", 'r') as f:
+       result_train = json.load(f)
     
-    for data in result:
-        verification = data["verification_result"].strip()
-        tmp = verification.split("\n\n")
-
-        assert tmp[0].strip() in ("Evaluation: INCORRECT", "Evaluation: CORRECT")
-
-        data["verification_result"] = "\n\n".join(tmp[1:]) + "\n\nEvaluation Result: " + tmp[0].strip().split(' ')[-1]
+    with open("xuhao/verify/data/output/verification_result_test_claude.json", 'r') as f:
+       result_test = json.load(f)
     
-    with open("xuhao/verify/data/output/new_verification_result_all_claude.json", 'w') as f:
-        json.dump(result, f, indent=4)
+    new_result_test = []
+
+    for data in result_test:
+        data["problem_index"] += 7473
+        if data["verification_result"] != "NIL":
+            new_result_test.append(data)
+
+    final_result = result_train + new_result_test
+    for data in final_result:
+        verification_result = data["verification_result"].strip()
+        assert verification_result.endswith("Evaluation Result: INCORRECT") or verification_result.endswith("Evaluation Result: CORRECT")
+        
+    with open("xuhao/verify/data/output/verification_result_claude.json", 'w') as f:
+        json.dump(final_result, f, indent=4)
