@@ -12,8 +12,6 @@ from tqdm import tqdm
 from openrlhf.models import GPTLMLoss
 from openrlhf.utils.distributed_sampler import DistributedSampler
 
-import re
-
 
 class SFTTrainer(ABC):
     """
@@ -40,12 +38,14 @@ class SFTTrainer(ABC):
         optim: Optimizer,
         train_dataloader,
         eval_dataloader,
+        eval_gen_dataloader,
         scheduler,
         max_norm: float = 1,
         pretrain_mode: bool = False,
         batch_size: int = 1,
         max_epochs: int = 2,
         tokenizer=None,
+        eval_gen_tokenizer=None
     ) -> None:
         super().__init__()
         self.strategy = strategy
@@ -54,10 +54,12 @@ class SFTTrainer(ABC):
         self.max_norm = max_norm
         self.train_dataloader = train_dataloader
         self.eval_dataloader = eval_dataloader
+        self.eval_gen_dataloader = eval_gen_dataloader
         self.scheduler = scheduler
         self.pretrain_mode = pretrain_mode
         self.model = model
         self.tokenizer = tokenizer
+        self.eval_gen_tokenizer = eval_gen_tokenizer
         self.optimizer = optim
         self.args = strategy.args
 
@@ -205,27 +207,6 @@ class SFTTrainer(ABC):
             self._wandb.finish()
         if self._tensorboard is not None and self.strategy.is_rank_0():
             self._tensorboard.close()
-    
-    def get_next_eval_number(self, directory="."):
-        # 获取目录下所有文件
-        files = os.listdir(directory)
-        
-        # 用正则表达式匹配 eval_result_数字.json 的文件
-        pattern = re.compile(r"eval_result_(\d+)\.json$")
-        
-        # 提取所有文件编号
-        numbers = []
-        for file in files:
-            match = pattern.match(file)
-            if match:
-                numbers.append(int(match.group(1)))
-        
-        # 如果没有找到任何匹配的文件，返回 0
-        if not numbers:
-            return 0
-        
-        # 返回最大编号 + 1
-        return max(numbers) + 1
 
     # logs/checkpoints/evaluation
     def save_logs_and_checkpoints(self, args, global_step, step_bar, logs_dict={}, client_states={}):
@@ -238,15 +219,43 @@ class SFTTrainer(ABC):
             elif self._tensorboard is not None and self.strategy.is_rank_0():
                 for k, v in logs_dict.items():
                     self._tensorboard.add_scalar(f"train/{k}", v, global_step)
+        
+        def get_next_eval_gen_file(directory='xuhao/sft/data/output'):
+            import re
+            # 获取目录下所有文件
+            files = os.listdir(directory)
+            
+            # 用正则表达式匹配 eval_step_数字.json 格式的文件
+            pattern = re.compile(r'eval_step_(\d+)\.json$')
+            
+            # 找出所有匹配的文件，提取编号
+            step_numbers = []
+            for file in files:
+                match = pattern.match(file)
+                if match:
+                    step_numbers.append(int(match.group(1)))
+            
+            # 如果没有找到匹配的文件，返回 0
+            if not step_numbers:
+                return "xuhao/sft/data/output/eval_step_0.json"
+            
+            # 否则返回最大编号 + 1
+            return "xuhao/sft/data/output/eval_step_{}.json".format(max(step_numbers)+1)
 
         # eval
         if global_step % args.eval_steps == 0:
             # do eval when len(dataloader) > 0, avoid zero division in eval.
             if len(self.eval_dataloader) > 0:
-                predictions = self.evaluate(self.eval_dataloader, global_step)
-                file_name = "xuhao/sft/data/output/eval_result_{}.json".format(self.get_next_eval_number("xuhao/sft/data/output"))
-                with open(file_name, 'w') as f:
-                    json.dump(predictions, f, indent=4)
+                self.evaluate(self.eval_dataloader, global_step)
+        
+        # compute verification accuracy in eval dataset
+        if global_step % args.eval_acc_steps == 0:
+            if len(self.eval_dataloader) > 0:
+                generated_results = self.generate(self.eval_gen_dataloader, global_step)
+                if self.strategy.is_rank_0():
+                    with open(get_next_eval_gen_file(), 'w') as f:
+                        json.dump(generated_results, f, indent=4)
+
         # save ckpt
         # TODO: save best model on dev, use loss/perplexity on whole dev dataset as metric
         if global_step % args.save_steps == 0:
@@ -255,10 +264,94 @@ class SFTTrainer(ABC):
                 self.model.model, args.ckpt_path, tag, args.max_ckpt_num, args.max_ckpt_mem, client_states
             )
 
+    def generate(self, eval_gen_dataloader, steps=0):
+        """生成文本的独立函数
+        
+        Args:
+            eval_dataloader: 评估数据集的dataloader
+            steps: 当前的训练步数
+            
+        Returns:
+            generated_results: 按原始数据集顺序排列的生成结果列表
+        """
+        self.model.eval()
+        
+        indexed_results = []
+        
+        pbar = tqdm(
+            eval_gen_dataloader,
+            desc="Generate stage of steps %d" % steps,
+            disable=not self.strategy.is_rank_0(),
+        )
+
+        def tokenize_fn(texts):
+            assert self.eval_gen_tokenizer is not None
+            batch = self.eval_gen_tokenizer(
+                texts,
+                return_tensors="pt",
+                add_special_tokens=False,
+                max_length=2048,
+                padding=True,
+                truncation=True,
+            )
+            return {k: v.to(torch.cuda.current_device()) for k, v in batch.items()}
+
+        with torch.no_grad():
+            for micro_batch_idx, prompts in enumerate(pbar):
+                # 获取当前batch的全局索引
+                batch_size = len(prompts)
+                rank = dist.get_rank() if dist.is_initialized() else 0
+                world_size = dist.get_world_size() if dist.is_initialized() else 1
+                base_idx = micro_batch_idx * self.args.micro_train_batch_size * world_size + rank
+                batch_indices = [base_idx + i * world_size for i in range(batch_size)]
+                
+
+                inputs = tokenize_fn(prompts)
+
+                # 生成文本
+                generate_kwargs = {
+                    "max_new_tokens": 1024,  # 可配置参数
+                    "do_sample": True,
+                    "top_p": 1.0,
+                    "temperature": 1.0,
+                    "early_stopping": False,
+                    "num_beams": 2,
+                    "pad_token_id": self.eval_gen_tokenizer.pad_token_id,
+                    "eos_token_id": self.eval_gen_tokenizer.eos_token_id,
+                }
+                generated_tokens = self.model.model.generate(
+                    **inputs,
+                    **generate_kwargs
+                )
+
+                input_length = inputs["input_ids"].shape[1]
+                responses = self.eval_gen_tokenizer.batch_decode(generated_tokens[:, input_length:], skip_special_tokens=True)
+
+                for response, global_idx in zip(responses, batch_indices):
+                    indexed_results.append((global_idx, response))
+
+        # 收集所有GPU的结果
+        if dist.is_initialized():
+            gathered_results = [None] * dist.get_world_size()
+            dist.all_gather_object(gathered_results, indexed_results)
+            # 展平并按原始索引排序
+            all_results = []
+            for process_results in gathered_results:
+                all_results.extend(process_results)
+            all_results.sort(key=lambda x: x[0])  # 按索引排序
+            generated_results = [text for _, text in all_results]  # 只保留文本部分
+        else:
+            # 非分布式情况
+            indexed_results.sort(key=lambda x: x[0])
+            generated_results = [text for _, text in indexed_results]
+        
+        self.model.train()
+        return generated_results
+
     def evaluate(self, eval_dataloader, steps=0):
+        """评估函数：计算loss并生成文本"""
         times = 0
         self.model.eval()
-        all_predictions = []  # 存储所有预测结果
         
         with torch.no_grad():
             loss_sum = 0
@@ -268,6 +361,7 @@ class SFTTrainer(ABC):
                 disable=not self.strategy.is_rank_0(),
             )
 
+            # 计算loss
             for prompt_id_lens, inputs, attention_masks, infos in eval_dataloader:
                 if self.packing_samples:
                     inputs = inputs.to(torch.cuda.current_device())
@@ -287,29 +381,6 @@ class SFTTrainer(ABC):
                         packed_seq_lens=infos["input_length"],
                     )
                     
-                # 获取预测结果
-                logits = output.logits
-                predictions = torch.argmax(logits, dim=-1)  # [batch_size, seq_len]
-                
-                # 对于每个样本，提取非padding部分的预测结果
-                batch_predictions = []
-                if self.packing_samples:
-                    index = 0
-                    for input_length in infos["input_length"]:
-                        pred = predictions[0, index:index + input_length]
-                        text = self.tokenizer.decode(pred.cpu().tolist(), skip_special_tokens=True)
-                        batch_predictions.append(text)
-                        index += input_length
-                else:
-                    for pred, mask in zip(predictions, attention_mask):
-                        # 只取attention mask为1的部分
-                        valid_pred = pred[mask.bool()]
-                        text = self.tokenizer.decode(valid_pred.cpu().tolist(), skip_special_tokens=False)
-                        batch_predictions.append(text)
-                
-                # 收集当前batch的预测结果
-                all_predictions.extend(batch_predictions)
-                    
                 # loss function
                 labels = torch.where(
                     attention_mask.bool(),
@@ -328,31 +399,12 @@ class SFTTrainer(ABC):
                             label[:source_len] = self.loss_fn.IGNORE_INDEX
 
                 loss = self.loss_fn(output.logits, labels)
-
                 times += 1
                 loss_sum += loss.item()
                 bar_dict = {"eval gpt_loss": loss_sum / times}
                 step_bar.update()
                 logs = self.strategy.all_reduce(bar_dict)
                 step_bar.set_postfix(logs)
-
-            # 在分布式环境中收集所有GPU上的预测结果
-            if dist.is_initialized():
-                # 首先收集每个进程的预测数量
-                local_count = torch.tensor(len(all_predictions), device=torch.cuda.current_device())
-                all_counts = [torch.zeros_like(local_count) for _ in range(dist.get_world_size())]
-                dist.all_gather(all_counts, local_count)
-                
-                # 然后收集预测结果
-                predictions_gathered = []
-                for i in range(dist.get_world_size()):
-                    if i == dist.get_rank():
-                        predictions_gathered.extend(all_predictions)
-                    else:
-                        predictions_gathered.extend([''] * int(all_counts[i].item()))
-                    dist.barrier()  # 确保进程同步
-            else:
-                predictions_gathered = all_predictions
 
             if self.strategy.is_rank_0():
                 if self._wandb is not None:
@@ -361,6 +413,5 @@ class SFTTrainer(ABC):
                 elif self._tensorboard is not None:
                     for k, v in logs.items():
                         self._tensorboard.add_scalar(f"eval/{k}", v, steps)
-                        
+               
         self.model.train()  # reset model state
-        return predictions_gathered  # 返回所有预测结果

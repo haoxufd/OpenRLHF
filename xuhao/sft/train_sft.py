@@ -10,6 +10,72 @@ from openrlhf.models import Actor
 from openrlhf.trainer import SFTTrainer
 from openrlhf.utils import blending_datasets, get_strategy, get_tokenizer
 
+from torch.utils.data import Dataset
+from tqdm import tqdm
+import json
+
+verification_system_message_file = "/root/OpenRLHF/xuhao/verify/data/input/verification_system_message.txt"
+verification_few_shot_file = "/root/OpenRLHF/xuhao/verify/data/input/verification_few_shot.json"
+
+def preprocess_data(data, input_key, apply_chat_template) -> str:
+    with open(verification_system_message_file, 'r') as f:
+        verification_system_message = f.read()
+    
+    with open(verification_few_shot_file, 'r') as f:
+        few_shot_examples = json.load(f)
+
+    data = data[input_key]
+    chat = [{"role": "system", "content": verification_system_message}]
+    for example in few_shot_examples:
+        chat.append({"role": "user", "content": example["input"]})
+        chat.append({"role": "assistant", "content": example["output"]})
+    chat.append({"role": "user", "content": data})
+    prompt = apply_chat_template(chat, tokenize=False, add_generation_prompt=True)
+    return prompt
+
+
+class PromptDataset(Dataset):
+    """
+    Dataset for PPO model
+
+    Args:
+        dataset: dataset for PPO model
+        tokenizer: tokenizer for PPO model
+        max_length: max length of input
+    """
+
+    def __init__(
+        self,
+        dataset,
+        tokenizer,
+        strategy,
+        input_template=None,
+    ) -> None:
+        super().__init__()
+        self.strategy = strategy
+        self.tokenizer = tokenizer
+
+        # chat_template
+        self.input_template = input_template
+        input_key = getattr(self.strategy.args, "input_key", None)
+        apply_chat_template = getattr(self.strategy.args, "apply_chat_template", False)
+
+        if apply_chat_template:
+            apply_chat_template = self.tokenizer.apply_chat_template
+
+        self.prompts = []
+        for data in tqdm(dataset, desc="Preprocessing data", disable=not self.strategy.is_rank_0()):
+            prompt = preprocess_data(data, input_key, apply_chat_template)
+            self.prompts.append(prompt)
+
+    def __len__(self):
+        length = len(self.prompts)
+        return length
+
+    def __getitem__(self, idx):
+        return self.prompts[idx]
+
+
 
 def train(args):
     # configure strategy
@@ -32,7 +98,10 @@ def train(args):
     )
     # configure tokenizer
     tokenizer = get_tokenizer(args.pretrain, model.model, "right", strategy, use_fast=not args.disable_fast_tokenizer)
-    tokenizer.chat_template = '{{- bos_token }}\n{%- if custom_tools is defined %}\n    {%- set tools = custom_tools %}\n{%- endif %}\n{%- if not tools_in_user_message is defined %}\n    {%- set tools_in_user_message = true %}\n{%- endif %}\n{%- if not date_string is defined %}\n    {%- set date_string = "26 Jul 2024" %}\n{%- endif %}\n{%- if not tools is defined %}\n    {%- set tools = none %}\n{%- endif %}\n\n{#- This block extracts the system message, so we can slot it into the right place. #}\n{%- if messages[0][\'role\'] == \'system\' %}\n    {%- set system_message = messages[0][\'content\']|trim %}\n    {%- set messages = messages[1:] %}\n{%- else %}\n    {%- set system_message = "" %}\n{%- endif %}\n\n{#- System message + builtin tools #}\n{{- "<|start_header_id|>system<|end_header_id|>\\n\\n" }}\n{%- if builtin_tools is defined or tools is not none %}\n    {{- "Environment: ipython\\n" }}\n{%- endif %}\n{%- if builtin_tools is defined %}\n    {{- "Tools: " + builtin_tools | reject(\'equalto\', \'code_interpreter\') | join(", ") + "\\n\\n"}}\n{%- endif %}\n{{- "Cutting Knowledge Date: December 2023\\n" }}\n{{- "Today Date: " + date_string + "\\n\\n" }}\n{%- if tools is not none and not tools_in_user_message %}\n    {{- "You have access to the following functions. To call a function, please respond with JSON for a function call." }}\n    {{- \'Respond in the format {"name": function name, "parameters": dictionary of argument name and its value}.\' }}\n    {{- "Do not use variables.\\n\\n" }}\n    {%- for t in tools %}\n        {{- t | tojson(indent=4) }}\n        {{- "\\n\\n" }}\n    {%- endfor %}\n{%- endif %}\n{{- system_message }}\n{{- "<|eot_id|>" }}\n\n{#- Custom tools are passed in a user message with some extra guidance #}\n{%- if tools_in_user_message and not tools is none %}\n    {#- Extract the first user message so we can plug it in here #}\n    {%- if messages | length != 0 %}\n        {%- set first_user_message = messages[0][\'content\']|trim %}\n        {%- set messages = messages[1:] %}\n    {%- else %}\n        {{- raise_exception("Cannot put tools in the first user message when there\'s no first user message!") }}\n{%- endif %}\n    {{- \'<|start_header_id|>user<|end_header_id|>\\n\\n\' -}}\n    {{- "Given the following functions, please respond with a JSON for a function call " }}\n    {{- "with its proper arguments that best answers the given prompt.\\n\\n" }}\n    {{- \'Respond in the format {"name": function name, "parameters": dictionary of argument name and its value}.\' }}\n    {{- "Do not use variables.\\n\\n" }}\n    {%- for t in tools %}\n        {{- t | tojson(indent=4) }}\n        {{- "\\n\\n" }}\n    {%- endfor %}\n    {{- first_user_message + "<|eot_id|>"}}\n{%- endif %}\n\n{%- for message in messages %}\n    {%- if not (message.role == \'ipython\' or message.role == \'tool\' or \'tool_calls\' in message) %}\n        {{- \'<|start_header_id|>\' + message[\'role\'] + \'<|end_header_id|>\\n\\n\'+ message[\'content\'] | trim + \'<|eot_id|>\' }}\n    {%- elif \'tool_calls\' in message %}\n        {%- if not message.tool_calls|length == 1 %}\n            {{- raise_exception("This model only supports single tool-calls at once!") }}\n        {%- endif %}\n        {%- set tool_call = message.tool_calls[0].function %}\n        {%- if builtin_tools is defined and tool_call.name in builtin_tools %}\n            {{- \'<|start_header_id|>assistant<|end_header_id|>\\n\\n\' -}}\n            {{- "<|python_tag|>" + tool_call.name + ".call(" }}\n            {%- for arg_name, arg_val in tool_call.arguments | items %}\n                {{- arg_name + \'="\' + arg_val + \'"\' }}\n                {%- if not loop.last %}\n                    {{- ", " }}\n                {%- endif %}\n                {%- endfor %}\n            {{- ")" }}\n        {%- else  %}\n            {{- \'<|start_header_id|>assistant<|end_header_id|>\\n\\n\' -}}\n            {{- \'{"name": "\' + tool_call.name + \'", \' }}\n            {{- \'"parameters": \' }}\n            {{- tool_call.arguments | tojson }}\n            {{- "}" }}\n        {%- endif %}\n        {%- if builtin_tools is defined %}\n            {#- This means we\'re in ipython mode #}\n            {{- "<|eom_id|>" }}\n        {%- else %}\n            {{- "<|eot_id|>" }}\n        {%- endif %}\n    {%- elif message.role == "tool" or message.role == "ipython" %}\n        {{- "<|start_header_id|>ipython<|end_header_id|>\\n\\n" }}\n        {%- if message.content is mapping or message.content is iterable %}\n            {{- message.content | tojson }}\n        {%- else %}\n            {{- message.content }}\n        {%- endif %}\n        {{- "<|eot_id|>" }}\n    {%- endif %}\n{%- endfor %}\n{%- if add_generation_prompt %}\n    {{- \'<|start_header_id|>assistant<|end_header_id|>\\n\\n\' }}\n{%- endif %}\n'
+    with open("xuhao/sft/data/input/chat_template.txt", 'r') as f:
+        tokenizer.chat_template = f.read()
+    tokenizer_eval_gen = get_tokenizer(args.pretrain, model.model, "left", strategy, use_fast=not args.disable_fast_tokenizer)
+    tokenizer_eval_gen.chat_template = tokenizer.chat_template
     strategy.print(model)
 
     # gradient_checkpointing
@@ -74,6 +143,11 @@ def train(args):
         input_template=args.input_template,
         multiple_of=args.ring_attn_size,
     )
+    eval_gen_dataset = PromptDataset(
+        eval_data,
+        tokenizer_eval_gen,
+        strategy
+    )
 
     # prepare dataloader
     train_dataloader = strategy.setup_dataloader(
@@ -89,6 +163,14 @@ def train(args):
         True,
         False,
         eval_dataset.packing_collate_fn if args.packing_samples else eval_dataset.collate_fn,
+        drop_last=False
+    )
+    eval_gen_dataloader = strategy.setup_dataloader(
+        eval_gen_dataset,
+        args.micro_train_batch_size,
+        True,
+        False,
+        drop_last=False
     )
 
     # scheduler
@@ -122,12 +204,14 @@ def train(args):
         optim=optim,
         train_dataloader=train_dataloader,
         eval_dataloader=eval_dataloader,
+        eval_gen_dataloader=eval_gen_dataloader,
         scheduler=scheduler,
         max_norm=args.max_norm,
         pretrain_mode=args.pretrain_mode,
         batch_size=args.train_batch_size,
         max_epochs=args.max_epochs,
         tokenizer=tokenizer,
+        eval_gen_tokenizer=tokenizer_eval_gen
     )
 
     trainer.fit(args, consumed_samples, num_update_steps_per_epoch)
@@ -139,7 +223,8 @@ def train(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
-    eval_steps = 1
+    eval_steps = -1
+    eval_acc_steps = 20
     pretrain = "/mnt/data/models/pretrain_models/Meta-Llama-3.1/Meta-Llama-3.1-8B"
     max_samples = 1e8
     dataset = "/root/OpenRLHF/xuhao/sft/data/input/sft_data"
@@ -148,8 +233,8 @@ if __name__ == "__main__":
     input_key = "input"
     output_key = "output"
 
-    micro_train_batch_size = 16
-    train_batch_size = 64
+    micro_train_batch_size = 8
+    train_batch_size = 32
 
 
     # Checkpoint
@@ -157,6 +242,7 @@ if __name__ == "__main__":
     parser.add_argument("--save_steps", type=int, default=-1)
     parser.add_argument("--logging_steps", type=int, default=1)
     parser.add_argument("--eval_steps", type=int, default=eval_steps)
+    parser.add_argument("--eval_acc_steps", type=int, default=eval_acc_steps)
     parser.add_argument("--ckpt_path", type=str, default="./ckpt/checkpoints_sft")
     parser.add_argument("--max_ckpt_num", type=int, default=3)
     parser.add_argument("--max_ckpt_mem", type=int, default=1e8)
@@ -228,7 +314,7 @@ if __name__ == "__main__":
     parser.add_argument("--max_len", type=int, default=2048, help="Max tokens for the samples")
 
     # wandb parameters
-    parser.add_argument("--use_wandb", type=str, default=None)
+    parser.add_argument("--use_wandb", type=str, default=True)
     parser.add_argument("--wandb_org", type=str, default=None)
     parser.add_argument("--wandb_group", type=str, default=None)
     parser.add_argument("--wandb_project", type=str, default="openrlhf_train_sft")

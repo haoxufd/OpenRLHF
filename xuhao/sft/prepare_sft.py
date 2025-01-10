@@ -89,5 +89,5 @@ def convert_dataset_format():
     return dataset_dict
 
 if __name__ == "__main__":
-    prepare_sft_dataset()
+    prepare_sft_dataset(train_test_ratio=9)
     convert_dataset_format()
