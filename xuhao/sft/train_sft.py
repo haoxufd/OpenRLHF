@@ -224,7 +224,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     eval_steps = -1
-    eval_acc_steps = 20
+    eval_acc_steps = 80
     pretrain = "/mnt/data/models/pretrain_models/Meta-Llama-3.1/Meta-Llama-3.1-8B"
     max_samples = 1e8
     dataset = "/root/OpenRLHF/xuhao/sft/data/input/sft_data"
