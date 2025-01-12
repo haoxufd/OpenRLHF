@@ -195,22 +195,22 @@ def batch_generate(args):
         result = []
         for idx, data in enumerate(prompts_data):
             result.append({
-                "index": idx,
-                "problem": data["question"],
-                "reference_solution": data["answer"],
-                "solution": sorted_outputs[idx]
+                "problem_index": data["problem_index"],
+                "step_index": data["step_index"],
+                "verification_result": sorted_outputs[idx]
             })
         with open(args.output_path, 'w') as f:
             json.dump(result, f, indent=4)
 
 if __name__ == "__main__":
-    pretrain = "/mnt/data/models/pretrain_models/Meta-Llama-3.1/Meta-Llama-3.1-8B"
-    dataset = "/root/OpenRLHF/xuhao/verify/data/input/test.json"
-    input_key = "verification_input"
+    pretrain = "/mnt/data/models/pretrain_models/Meta-Llama-3.1/Meta-Llama-3.1-8B-Instruct"
+    dataset = "/root/OpenRLHF/xuhao/verify/data/input/verification_data_test.json"
+    input_key = "input"
     max_samples = 1e8
-    output_path = "/root/OpenRLHF/xuhao/verify/data/output/test.json"
-    prompt_max_length = 2048
+    output_path = "/root/OpenRLHF/xuhao/verify/data/output/verification_result_test_llama-3.1-8b-instruct-result-first.json"
+    prompt_max_length = 4096
     max_new_tokens = 1024
+    train_batch_size = 126
 
     torch.cuda.empty_cache()
     parser = argparse.ArgumentParser()
@@ -223,6 +223,7 @@ if __name__ == "__main__":
     parser.add_argument("--flash_attn", action="store_true", default=False, help="Enable FlashAtten2")
     parser.add_argument("--disable_fast_tokenizer", action="store_true", default=False)
     parser.add_argument("--micro_batch_size", type=int, default=1)
+    parser.add_argument("--train_batch_size", type=int, default=126)
     parser.add_argument("--seed", type=int, default=1234)
 
     # Models
