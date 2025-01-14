@@ -2,5 +2,9 @@
     {
         "problem": "Janet's ducks lay 16 eggs per day. She eats three for breakfast and uses four for muffins. She sells the rest at $2 each. How much does she make daily?",
         "solution": "1. Calculate remaining eggs for sale. Eggs available = < 16 - 3 - 4 = 9 > eggs.\n2. Calculate daily revenue. Daily revenue = 9 eggs × $2 per egg = < 9 * 2 = 18 > dollars.\n#### 18"
+    },
+    {
+        "problem": "Arthur has 3 dogs. They eat an average of 15 pounds of food a week. One dog eats 13 pounds a week. The second eats double this. How much does the third dog eat a week?",
+        "solution": "1. Calculate the second dog's food consumption. Second dog's food = 13 pounds × 2 = < 13 * 2 = 26 > pounds.\n2. Calculate the total food consumption of the first two dogs. First two dogs' food = 13 pounds + 26 pounds = < 13 + 26 = 39 > pounds.\n3. Calculate the third dog's food consumption. Third dog's food = Total food - First two dogs' food = 15 pounds - 39 pounds = < 15 - 39 = -24 > pounds.\n4. Since a dog cannot eat a negative amount of food, the given information is inconsistent.\n#### None"
     }
 ]

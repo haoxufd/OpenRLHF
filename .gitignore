@@ -153,3 +153,5 @@ core
 ckpt/
 
 wandb/
+
+xuhao/sft/data/input/sft_data

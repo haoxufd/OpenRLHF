@@ -192,22 +192,22 @@ def batch_generate(args):
         result = []
         for idx, data in enumerate(prompts_data):
             result.append({
-                "index": idx,
-                "problem": data["question"],
-                "reference_solution": data["answer"],
+                "problem_index": idx,
                 "solution": sorted_outputs[idx]
             })
         with open(args.output_path, 'w') as f:
             json.dump(result, f, indent=4)
 
 if __name__ == "__main__":
-    pretrain = "/mnt/data/models/pretrain_models/Meta-Llama-3.1/Meta-Llama-3.1-8B-Instruct"
-    dataset = "/root/OpenRLHF/xuhao/solve/data/input/gsm8k_test.json"
-    input_key = "question"
+    pretrain = "/mnt/data/models/pretrain_models/Qwen2.5-1.5B-Instruct"
+    dataset = "/root/OpenRLHF/xuhao/solve/data/input/gsm8k.json"
+    input_key = "problem"
     max_samples = 1e8
-    output_path = "/root/OpenRLHF/xuhao/solve/data/output/solution_test.json"
+    output_path = "/root/OpenRLHF/xuhao/solve/data/output/solution_new.json"
     prompt_max_length = 2048
     max_new_tokens = 1024
+    micro_batch_size = 8
+    train_batch_size = 24
 
     torch.cuda.empty_cache()
     parser = argparse.ArgumentParser()
@@ -219,8 +219,8 @@ if __name__ == "__main__":
     parser.add_argument("--bf16", action="store_true", default=True, help="Enable bfloat16 for deepspeed")
     parser.add_argument("--flash_attn", action="store_true", default=False, help="Enable FlashAtten2")
     parser.add_argument("--disable_fast_tokenizer", action="store_true", default=False)
-    parser.add_argument("--micro_batch_size", type=int, default=1)
-    parser.add_argument("--train_batch_size", type=int, default=125)
+    parser.add_argument("--micro_batch_size", type=int, default=micro_batch_size)
+    parser.add_argument("--train_batch_size", type=int, default=train_batch_size)
     parser.add_argument("--seed", type=int, default=1234)
 
     # Models
