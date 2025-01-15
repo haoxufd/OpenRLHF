@@ -186,28 +186,21 @@ def batch_generate(args):
         all_outputs.sort(key=lambda x: x[0])
         
         # 只保存排序后的输出结果
-        sorted_outputs = [output for _, output in all_outputs]
+        sorted_outputs = [{"solution": output} for _, output in all_outputs]
         
-        # 写入最终结果
-        result = []
-        for idx, data in enumerate(prompts_data):
-            result.append({
-                "problem_index": idx,
-                "solution": sorted_outputs[idx]
-            })
         with open(args.output_path, 'w') as f:
-            json.dump(result, f, indent=4)
+            json.dump(sorted_outputs, f, indent=4)
 
-if __name__ == "__main__":
+def main():
     pretrain = "/mnt/data/models/pretrain_models/Qwen2.5-1.5B-Instruct"
-    dataset = "/root/OpenRLHF/xuhao/solve/data/input/gsm8k.json"
+    dataset = "/root/OpenRLHF/xuhao/solve/data/input/gsm8k-1.json"
     input_key = "problem"
-    max_samples = 1e8
-    output_path = "/root/OpenRLHF/xuhao/solve/data/output/solution_new.json"
+    max_samples = 104
+    output_path = "/root/OpenRLHF/xuhao/solve/data/output/solution-1.json"
     prompt_max_length = 2048
     max_new_tokens = 1024
     micro_batch_size = 8
-    train_batch_size = 24
+    train_batch_size = 32
 
     torch.cuda.empty_cache()
     parser = argparse.ArgumentParser()
@@ -280,3 +273,18 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     batch_generate(args=args)
+
+def filter_solution(solution_file):
+    with open(solution_file, 'r') as f:
+        solution = json.load(f)
+    
+    result = [{k: v for k, v in data.items()} for data in solution if "####" in data["solution"]]
+
+    print(len(solution))
+    print(len(result))
+
+    with open(solution_file, 'w') as f:
+        json.dump(result, f, indent=4)
+
+if __name__ == "__main__":
+    main()
