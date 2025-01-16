@@ -2,8 +2,10 @@ import argparse
 import os
 from datetime import timedelta
 from tkinter import NO
+from turtle import pos
 
 import jsonlines
+from numpy import append
 import torch
 from torch import distributed as dist
 from tqdm import tqdm
@@ -16,8 +18,9 @@ from openrlhf.utils import blending_datasets, get_processor, get_strategy, get_t
 import json
 from torch.utils.data import Dataset
 
-solution_system_message_file = "/root/OpenRLHF/xuhao/solve/data/input/solution_system_message.txt"
-solution_few_shot_file = "/root/OpenRLHF/xuhao/solve/data/input/solution_few_shot.json"
+home_dir = "/home/user"
+solution_system_message_file = f"{home_dir}/OpenRLHF/xuhao/solve/data/input/solution_system_message.txt"
+solution_few_shot_file = f"{home_dir}/OpenRLHF/xuhao/solve/data/input/solution_few_shot.json"
 
 def preprocess_data(data, input_key, apply_chat_template) -> str:
     with open(solution_system_message_file, 'r') as f1, open(solution_few_shot_file, 'r') as f2:
@@ -139,8 +142,8 @@ def batch_generate(args):
 
     for batch_idx, prompts in enumerate(pbar):
         # 计算当前批次中样本的全局索引
-        start_idx = batch_idx * args.micro_batch_size * dist.get_world_size() + dist.get_rank() * args.micro_batch_size
-        batch_indices = list(range(start_idx, start_idx + len(prompts)))
+        start_idx = batch_idx * args.micro_batch_size * dist.get_world_size() + dist.get_rank()
+        batch_indices = [start_idx + i * dist.get_world_size() for i in range(len(prompts))]
 
         inputs = tokenize_fn(prompts)
         for _ in range(N):
@@ -192,15 +195,15 @@ def batch_generate(args):
             json.dump(sorted_outputs, f, indent=4)
 
 def main():
-    pretrain = "/mnt/data/models/pretrain_models/Qwen2.5-1.5B-Instruct"
-    dataset = "/root/OpenRLHF/xuhao/solve/data/input/gsm8k-1.json"
+    pretrain = "/home/user/models/Qwen2.5-1.5B-Instruct"
+    dataset = f"{home_dir}/OpenRLHF/xuhao/solve/data/input/gsm8k-1.json"
     input_key = "problem"
-    max_samples = 104
-    output_path = "/root/OpenRLHF/xuhao/solve/data/output/solution-1.json"
+    max_samples = 1e8
+    output_path = f"{home_dir}/OpenRLHF/xuhao/solve/data/output/solution-1.json"
     prompt_max_length = 2048
     max_new_tokens = 1024
     micro_batch_size = 8
-    train_batch_size = 32
+    train_batch_size = 64
 
     torch.cuda.empty_cache()
     parser = argparse.ArgumentParser()
@@ -275,6 +278,9 @@ def main():
     batch_generate(args=args)
 
 def filter_solution(solution_file):
+    """
+    过滤掉不合规的 solution
+    """
     with open(solution_file, 'r') as f:
         solution = json.load(f)
     
@@ -286,5 +292,86 @@ def filter_solution(solution_file):
     with open(solution_file, 'w') as f:
         json.dump(result, f, indent=4)
 
+def postprocess_solution(solution_file, problem_file, num=1e8):
+    """
+    找到生成 solution 对应的 problem 文件, solution 和 problem 一一对应
+    将 problem_index 加到 solution 中
+    """
+    with open(problem_file, 'r') as f1, open(solution_file, 'r') as f2:
+        problem = json.load(f1)
+        solution = json.load(f2)
+    
+    new_solution = []
+    num = min(num, len(problem))
+    for idx in range(num):
+        new_solution.append({
+            "problem_index": problem[idx]["index"],
+            "solution": solution[idx]["solution"]
+        })
+    
+    with open(solution_file, 'w') as f:
+        json.dump(new_solution, f, indent=4)
+
+def generate_problem_file(solution_label_file, input_problem_file, output_problem_file):
+    """
+    从 input_problem_file 中选取 solution 错误的以及没有 solution 的 problem
+    得到 output_problem_file
+    """
+    with open(input_problem_file, 'r') as f1, open(solution_label_file, 'r') as f2:
+        problem = json.load(f1)
+        solution_label = json.load(f2)
+    
+    result = []
+
+    num = len(problem)
+    tag = [True] * num
+
+    for data in solution_label:
+        if data["solution_label"] == False:
+            tag[data["problem_index"]] = False
+
+    for data in problem:
+        if tag[data["problem_index"]]:
+            result.append(data)
+    
+    with open(output_problem_file, 'w') as f:
+        json.dump(result, f, indent=4)
+
+def merge_solution(solution_file_1, solution_file_2, solution_label_file_2):
+    """
+    把 soluton_file_2 中的错误 solution 合到 solution_file_1
+    """
+    with open(solution_file_1, 'r') as f1, open(solution_file_2, 'r') as f2, open(solution_label_file_2, 'r') as f:
+        solution_1 = json.load(f1)
+        solution_2 = json.load(f2)
+        solution_label_2 = json.load(f)
+    
+    # 得到 solution_1 中 problem_index 到 index 的映射
+    map_pidx_to_idx = {}
+    for idx, data in enumerate(solution_1):
+        map_pidx_to_idx[data["problem_index"]] = idx
+    
+    # 遍历 solution_2 中的所有答案, 将不正确的答案合并到 solution_2
+    assert len(solution_2) == len(solution_label_2)
+    for i in range(len(solution_2)):
+        if solution_label_2[i]["solution_label"] == False:
+            if solution_2[i]["problem_index"] in map_pidx_to_idx:
+                solution_1[map_pidx_to_idx[solution_2[i]["problem_index"]]]["solution"] = solution_2[i]["solution"]
+            else:
+                solution_1.append(solution_2[i])
+        if solution_2[i]["problem_index"] not in map_pidx_to_idx:
+            solution_1.append(solution_2[i])
+    
+    solution_1.sort(key=lambda x: x["problem_index"])
+    with open(solution_file_1, 'w') as f:
+        json.dump(solution_1, f, indent=4)
+
 if __name__ == "__main__":
-    main()
+    # postprocess_solution(
+    #     "xuhao/solve/data/output/solution-1.json", 
+    #     "xuhao/solve/data/input/gsm8k-1.json")
+    # merge_solution(
+    #     solution_file_1="xuhao/solve/data/output/solution.json",
+    #     solution_file_2="xuhao/solve/data/output/solution-1.json",
+    #     solution_label_file_2="xuhao/solve/data/output/solution_label-1.json")
+    filter_solution(solution_file="xuhao/solve/data/output/solution.json")

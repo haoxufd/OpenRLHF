@@ -2,11 +2,13 @@ import json
 import re
 from unittest import result
 
+home_dir = "/home/user"
+
 
 def generate_solution_label(
-        problem_file="/root/OpenRLHF/xuhao/solve/data/input/gsm8k.json",
-        solution_file = "/root/OpenRLHF/xuhao/solve/data/output/solution.json",
-        solution_label_file = "/root/OpenRLHF/xuhao/solve/data/output/solution_label.json"):
+        problem_file=f"{home_dir}/OpenRLHF/xuhao/solve/data/input/gsm8k.json",
+        solution_file = f"{home_dir}/OpenRLHF/xuhao/solve/data/output/solution.json",
+        solution_label_file = f"{home_dir}/OpenRLHF/xuhao/solve/data/output/solution_label.json"):
     solution_label = []
     
     with open(solution_file, 'r') as f1, open(problem_file, 'r') as f2:
@@ -42,23 +44,11 @@ def generate_solution_label(
         json.dump(solution_label, f, indent=4)
 
 if __name__ == "__main__":
-    tag = [True] * 8792
-    with open("xuhao/solve/data/output/solution_label.json", 'r') as f:
-        solution_label = json.load(f)
+    # generate_solution_label(
+    #     solution_file = f"{home_dir}/OpenRLHF/xuhao/solve/data/output/solution.json",
+    #     solution_label_file = f"{home_dir}/OpenRLHF/xuhao/solve/data/output/solution_label.json"
+    # )
+    with open(f"{home_dir}/OpenRLHF/xuhao/solve/data/output/solution_label.json", 'r') as f:
+        l = json.load(f)
     
-    for data in solution_label:
-        if data["solution_label"] == False:
-            tag[data["problem_index"]] = False
-    
-    with open("xuhao/solve/data/input/gsm8k.json", 'r') as f:
-        problem = json.load(f)
-
-    result = []
-    for idx, data in enumerate(problem):
-        if tag[idx]:
-            result.append(data)
-    
-    assert len(result) == 8792 - 860
-    
-    with open("xuhao/solve/data/input/gsm8k_correct.json", 'w') as f:
-        json.dump(result, f, indent=4)
+    print(len(l))
