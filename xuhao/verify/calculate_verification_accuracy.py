@@ -63,7 +63,8 @@ def get_verification_accuracy_plevel(
             json.dump(result, f, indent=4)
         print("Verification result label has been written to ", verification_result_label_file)
 
-def get_verification_accuracy_slevel(verification_result_file = "xuhao/verify/data/output/verification_result_claude.json"):
+def get_verification_accuracy_slevel(
+        verification_result_file = "xuhao/verify/data/output/verification_result_claude.json"):
     with open(verification_result_file, 'r') as f:
         result = json.load(f)
 
@@ -110,18 +111,7 @@ def postprocess_eval_result():
             json.dump(verification_result, f, indent=4)
 
 if __name__ == "__main__":
-    # print("********************************** 0 **********************************")
-
-    # print("********************************** Problem Level **********************************")
-    # get_verification_accuracy_plevel(verification_result_file="xuhao/sft/data/output/verification_result_llama-3.1-8b-sft_0.json", solution_label_file="xuhao/sft/data/input/solution_label_test.json")
-    # print("********************************** Step Level **********************************")
-    # get_verification_accuracy_slevel(verification_result_file="xuhao/sft/data/output/verification_result_llama-3.1-8b-sft_0.json")
-
-    # print("********************************** 19 **********************************")
-
-    # print("********************************** Problem Level **********************************")
-    # get_verification_accuracy_plevel(verification_result_file="xuhao/sft/data/output/verification_result_llama-3.1-8b-sft_19.json", solution_label_file="xuhao/sft/data/input/solution_label_test.json")
-    # print("********************************** Step Level **********************************")
-    # get_verification_accuracy_slevel(verification_result_file="xuhao/sft/data/output/verification_result_llama-3.1-8b-sft_19.json")
-
-    get_verification_accuracy_plevel(verification_result_file="xuhao/verify/data/output/verification_result_test_llama-3.1-8b-sft-1-eval-to-reasoning.json", solution_label_file="xuhao/sft/data/input/solution_label_test.json")
+    get_verification_accuracy_plevel(
+        verification_result_file="xuhao/verify/data/output/verification_result_claude_new.json",
+        solution_label_file="xuhao/solve/data/output/solution_label_new.json",
+        verification_result_label_file="xuhao/verify/data/output/verification_result_label_claude_new.json")

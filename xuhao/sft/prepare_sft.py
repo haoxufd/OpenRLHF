@@ -1,11 +1,13 @@
 import json
 
 from datasets import Dataset, DatasetDict
+from utils import get_grouped_data
 
-verification_result_file = "xuhao/verify/data/output/verification_result_claude.json"
-verification_result_label_file = "xuhao/verify/data/output/verification_result_label_claude.json"
-verification_data_file = "xuhao/verify/data/input/verification_data.json"
-sft_dataset_file = "xuhao/sft/data/input/sft_data.json"
+verification_result_file = "xuhao/verify/data/output/verification_result_claude_new.json"
+verification_result_label_file = "xuhao/verify/data/output/verification_result_label_claude_new.json"
+verification_data_file = "xuhao/verify/data/input/verification_data_new.json"
+sft_dataset_file = "xuhao/sft/data/input/sft_data_new.json"
+sft_dataset_dir = "xuhao/sft/data/input/sft_data_new"
 
 def get_verification_input(verification_data, problem_index, step_index):
     for data in verification_data:
@@ -56,6 +58,34 @@ def prepare_sft_dataset(train_test_ratio=24):
     with open(sft_dataset_file, 'w') as f:
         json.dump(final_data, f, indent=4)
 
+def get_sft_data_distribution(sft_dataset_file):
+    with open(sft_dataset_file, 'r') as f:
+        sft_data = json.load(f)
+    
+    sft_train_data = sft_data["train"]
+    sft_test_data = sft_data["test"]
+
+    grouped_train_data = get_grouped_data(sft_train_data)
+    grouped_test_data = get_grouped_data(sft_test_data)
+
+    num_incorrect_train_item = 0
+    num_incorrect_test_item = 0
+    for item in sft_train_data:
+        if "incorrect" in item["output"].lower():
+            num_incorrect_train_item += 1
+    for item in sft_test_data:
+        if "incorrect" in item["output"].lower():
+            num_incorrect_test_item += 1
+
+    print("Num Train Data Problem: ", len(grouped_train_data))
+    print("Num Train Data Item: ", len(sft_train_data))
+    print("Num Train Data INCORRECT Item: ", num_incorrect_train_item)
+    print("Num Test Data Problem: ", len(grouped_test_data))
+    print("Num Test Data Item: ", len(sft_test_data))
+    print("Num Test Data INCORRECT Item: ", num_incorrect_test_item)
+
+
+
 def convert_dataset_format():
     # 读取原始数据
     with open(sft_dataset_file, 'r') as f:
@@ -84,7 +114,7 @@ def convert_dataset_format():
     })
 
     # 保存到磁盘
-    dataset_dict.save_to_disk('xuhao/sft/data/input/sft_data')
+    dataset_dict.save_to_disk(sft_dataset_dir)
     
     return dataset_dict
 

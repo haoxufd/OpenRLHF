@@ -14,8 +14,8 @@ from torch.utils.data import Dataset
 from tqdm import tqdm
 import json
 
-verification_system_message_file = "/root/OpenRLHF/xuhao/verify/data/input/verification_system_message.txt"
-verification_few_shot_file = "/root/OpenRLHF/xuhao/verify/data/input/verification_few_shot.json"
+verification_system_message_file = "xuhao/verify/data/input/verification_system_message.txt"
+verification_few_shot_file = "xuhao/verify/data/input/verification_few_shot.json"
 
 def preprocess_data(data, input_key, apply_chat_template) -> str:
     with open(verification_system_message_file, 'r') as f:
@@ -227,7 +227,7 @@ if __name__ == "__main__":
     eval_acc_steps = 80
     pretrain = "/mnt/data/models/pretrain_models/Meta-Llama-3.1/Meta-Llama-3.1-8B"
     max_samples = 1e8
-    dataset = "/root/OpenRLHF/xuhao/sft/data/input/sft_data"
+    dataset = "xuhao/sft/data/input/sft_data_new"
     load_checkpoint = False
     max_epoches = 2
     input_key = "input"

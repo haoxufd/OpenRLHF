@@ -349,7 +349,7 @@ class SFTTrainer(ABC):
         return generated_results
 
     def evaluate(self, eval_dataloader, steps=0):
-        """评估函数：计算loss并生成文本"""
+        """评估函数: 计算loss并生成文本"""
         times = 0
         self.model.eval()
         

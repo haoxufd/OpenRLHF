@@ -202,8 +202,8 @@ def main():
     output_path = f"{home_dir}/OpenRLHF/xuhao/solve/data/output/solution-1.json"
     prompt_max_length = 2048
     max_new_tokens = 1024
-    micro_batch_size = 8
-    train_batch_size = 64
+    micro_batch_size = 4
+    train_batch_size = 12
 
     torch.cuda.empty_cache()
     parser = argparse.ArgumentParser()
@@ -294,7 +294,7 @@ def filter_solution(solution_file):
 
 def postprocess_solution(solution_file, problem_file, num=1e8):
     """
-    找到生成 solution 对应的 problem 文件, solution 和 problem 一一对应
+    找到生成 solution 对应的 problem 文件, solution 和 problem 一一对应, solution 可能多出几个
     将 problem_index 加到 solution 中
     """
     with open(problem_file, 'r') as f1, open(solution_file, 'r') as f2:
@@ -312,10 +312,11 @@ def postprocess_solution(solution_file, problem_file, num=1e8):
     with open(solution_file, 'w') as f:
         json.dump(new_solution, f, indent=4)
 
-def generate_problem_file(solution_label_file, input_problem_file, output_problem_file):
+def generate_problem_file(solution_label_file, input_problem_file, output_problem_file, include_correct=True):
     """
-    从 input_problem_file 中选取 solution 错误的以及没有 solution 的 problem
-    得到 output_problem_file
+    从 input_problem_file 中选取一部分 problem 得到 output_problem_file
+    若 include_correct 为 True, 选取 solution 为正确的 problem 以及没有 solution 的 problem
+    否则只选取没有 solution 的 problem
     """
     with open(input_problem_file, 'r') as f1, open(solution_label_file, 'r') as f2:
         problem = json.load(f1)
@@ -327,11 +328,14 @@ def generate_problem_file(solution_label_file, input_problem_file, output_proble
     tag = [True] * num
 
     for data in solution_label:
-        if data["solution_label"] == False:
+        if include_correct:
+            if data["solution_label"] == False:
+                tag[data["problem_index"]] = False
+        else:
             tag[data["problem_index"]] = False
 
     for data in problem:
-        if tag[data["problem_index"]]:
+        if tag[data["index"]]:
             result.append(data)
     
     with open(output_problem_file, 'w') as f:
@@ -340,6 +344,7 @@ def generate_problem_file(solution_label_file, input_problem_file, output_proble
 def merge_solution(solution_file_1, solution_file_2, solution_label_file_2):
     """
     把 soluton_file_2 中的错误 solution 合到 solution_file_1
+    对于 solution_file_1 中没有的 solution, 不管对错自动合入
     """
     with open(solution_file_1, 'r') as f1, open(solution_file_2, 'r') as f2, open(solution_label_file_2, 'r') as f:
         solution_1 = json.load(f1)
@@ -354,24 +359,64 @@ def merge_solution(solution_file_1, solution_file_2, solution_label_file_2):
     # 遍历 solution_2 中的所有答案, 将不正确的答案合并到 solution_2
     assert len(solution_2) == len(solution_label_2)
     for i in range(len(solution_2)):
-        if solution_label_2[i]["solution_label"] == False:
-            if solution_2[i]["problem_index"] in map_pidx_to_idx:
+        if solution_2[i]["problem_index"] in map_pidx_to_idx:
+            if solution_label_2[i]["solution_label"] == False:
                 solution_1[map_pidx_to_idx[solution_2[i]["problem_index"]]]["solution"] = solution_2[i]["solution"]
-            else:
-                solution_1.append(solution_2[i])
-        if solution_2[i]["problem_index"] not in map_pidx_to_idx:
+        else:
             solution_1.append(solution_2[i])
     
     solution_1.sort(key=lambda x: x["problem_index"])
     with open(solution_file_1, 'w') as f:
         json.dump(solution_1, f, indent=4)
 
+def print_item_num(json_file):
+    with open(json_file, 'r') as f:
+        print(len(json.load(f)))
+
+def read_json_list_file(json_file):
+    with open(json_file, 'r') as f:
+        return json.load(f)
+
+def write_json_list_file(json_file, data):
+    with open(json_file, 'w') as f:
+        json.dump(data, f, indent=4)
+
+def generate_standard_solution(problem_file, solution_file):
+    problem = read_json_list_file(problem_file)
+    
+    result = []
+    for data in problem:
+        steps = [f"{idx+1}. {step}" for idx, step in enumerate(data["reference_solution"].split('\n')[:-1])]
+        result_value = data["reference_solution"].split('\n')[-1]
+        result.append({
+            "problem_index": data["index"],
+            "solution": '\n'.join(steps + [result_value])
+        })
+    
+    write_json_list_file(solution_file, result)
+
 if __name__ == "__main__":
+    # generate_problem_file(
+    #     solution_label_file="xuhao/solve/data/output/solution_label.json",
+    #     input_problem_file="xuhao/solve/data/input/gsm8k.json",
+    #     output_problem_file="xuhao/solve/data/input/gsm8k-1.json",
+    #     include_correct=False)
+    
+    # main()
+
+    # generate_standard_solution(
+    #     "xuhao/solve/data/input/gsm8k-1.json", 
+    #     "xuhao/solve/data/output/solution-1.json")
+
     # postprocess_solution(
     #     "xuhao/solve/data/output/solution-1.json", 
     #     "xuhao/solve/data/input/gsm8k-1.json")
+    
+    # filter_solution(solution_file="xuhao/solve/data/output/solution-1.json")
+
     # merge_solution(
     #     solution_file_1="xuhao/solve/data/output/solution.json",
     #     solution_file_2="xuhao/solve/data/output/solution-1.json",
     #     solution_label_file_2="xuhao/solve/data/output/solution_label-1.json")
-    filter_solution(solution_file="xuhao/solve/data/output/solution.json")
+    
+    # print_item_num("xuhao/solve/data/output/solution.json")

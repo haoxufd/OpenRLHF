@@ -44,11 +44,10 @@ def generate_solution_label(
         json.dump(solution_label, f, indent=4)
 
 if __name__ == "__main__":
-    # generate_solution_label(
-    #     solution_file = f"{home_dir}/OpenRLHF/xuhao/solve/data/output/solution.json",
-    #     solution_label_file = f"{home_dir}/OpenRLHF/xuhao/solve/data/output/solution_label.json"
-    # )
+    generate_solution_label(
+        solution_file = f"{home_dir}/OpenRLHF/xuhao/solve/data/output/solution.json",
+        solution_label_file = f"{home_dir}/OpenRLHF/xuhao/solve/data/output/solution_label.json"
+    )
     with open(f"{home_dir}/OpenRLHF/xuhao/solve/data/output/solution_label.json", 'r') as f:
         l = json.load(f)
-    
     print(len(l))
