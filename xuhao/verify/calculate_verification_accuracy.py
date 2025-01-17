@@ -34,17 +34,17 @@ def get_verification_accuracy_plevel(
     ic = 0
     ii = 0
     for idx, label in enumerate(solution_label):
-        verification_result_label = label == all(concise_verification_result[idx])
+        verification_result_label = label["solution_label"] == all(concise_verification_result[idx])
         if verification_result_label:
             num_right_verification += 1
-        if label and verification_result_label:
+        if label["solution_label"] and verification_result_label:
             cc += 1
-        elif label and not verification_result_label:
+        elif label["solution_label"] and not verification_result_label:
             ci += 1
-        elif not label and verification_result_label:
-            ic += 1
-        else:
+        elif not label["solution_label"] and verification_result_label:
             ii += 1
+        else:
+            ic += 1
         result.append({
             "problem_index": idx,
             "verification_result_label": verification_result_label
@@ -55,8 +55,8 @@ def get_verification_accuracy_plevel(
     print("Verification Accuracy: ", num_right_verification / len(solution_label))
     print(f"Verify CORRECT Solution to be CORRECT: {cc}")
     print(f"Verify CORRECT Solution to be INCORRECT: {ci}")
-    print(f"Verify INCORRECT Solution to be CORRECT: {ii}")
-    print(f"Verify INCORRECT Solution to be INCORRECT: {ic}")
+    print(f"Verify INCORRECT Solution to be CORRECT: {ic}")
+    print(f"Verify INCORRECT Solution to be INCORRECT: {ii}")
     
     if verification_result_label_file is not None:
         with open(verification_result_label_file, 'w') as f:

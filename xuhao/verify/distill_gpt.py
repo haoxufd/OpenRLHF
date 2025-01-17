@@ -136,4 +136,4 @@ def postprocess_verification_result(
     write_json_list_file(verification_result_file, result)
 
 if __name__ == "__main__":
-    generate_verification_result_gpt()
+    postprocess_verification_result()

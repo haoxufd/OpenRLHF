@@ -223,7 +223,7 @@ def train(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
-    eval_steps = -1
+    eval_steps = 80
     eval_acc_steps = 80
     pretrain = "/mnt/data/models/pretrain_models/Meta-Llama-3.1/Meta-Llama-3.1-8B"
     max_samples = 1e8
@@ -232,18 +232,20 @@ if __name__ == "__main__":
     max_epoches = 2
     input_key = "input"
     output_key = "output"
+    save_path = "/mnt/data/user/zhao_jun/xuhao/ckpt2"
+    ckpt_path = "/mnt/data/user/zhao_jun/xuhao/ckpt2/checkpoints_sft"
 
     micro_train_batch_size = 8
     train_batch_size = 32
 
 
     # Checkpoint
-    parser.add_argument("--save_path", type=str, default="./ckpt")
+    parser.add_argument("--save_path", type=str, default=save_path)
     parser.add_argument("--save_steps", type=int, default=-1)
     parser.add_argument("--logging_steps", type=int, default=1)
     parser.add_argument("--eval_steps", type=int, default=eval_steps)
     parser.add_argument("--eval_acc_steps", type=int, default=eval_acc_steps)
-    parser.add_argument("--ckpt_path", type=str, default="./ckpt/checkpoints_sft")
+    parser.add_argument("--ckpt_path", type=str, default=ckpt_path)
     parser.add_argument("--max_ckpt_num", type=int, default=3)
     parser.add_argument("--max_ckpt_mem", type=int, default=1e8)
     parser.add_argument("--load_checkpoint", action="store_true", default=load_checkpoint)

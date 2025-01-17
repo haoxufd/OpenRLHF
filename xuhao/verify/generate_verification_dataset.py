@@ -1,6 +1,6 @@
 import json
 import re
-from utils import get_grouped_data
+from xuhao.utils import get_grouped_data
 
 home_dir = "/home/user"
 
@@ -89,6 +89,6 @@ def merge_verification_result(verification_result_file_1, verification_result_fi
     
 if __name__ == "__main__":
     merge_verification_result(
-        "xuhao/verify/data/ouput/verification_result_claude_old.json",
-        "xuhao/verify/data/ouput/verification_result_claude.json",
-        "xuhao/verify/data/ouput/verification_result_claude_new.json")
+        "xuhao/verify/data/output/verification_result_claude_old.json",
+        "xuhao/verify/data/output/verification_result_claude.json",
+        "xuhao/verify/data/output/verification_result_claude_new.json")

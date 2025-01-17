@@ -20,9 +20,13 @@ def preprocess_data(data, input_template=None, input_key="input", output_key=Non
                 system_message = [{"role": "system", "content": system_message}]
                 prompt_message = system_message + [{"role": "user", "content": prompt_message}]
                 response_message = [{"role": "assistant", "content": response_message}]
-
-            prompt = apply_chat_template(prompt_message, tokenize=False, add_generation_prompt=True)
-            response = apply_chat_template(prompt_message + response_message, tokenize=False)[len(prompt) :]
+            try:
+                prompt = apply_chat_template(prompt_message, tokenize=False, add_generation_prompt=True)
+                response = apply_chat_template(prompt_message + response_message, tokenize=False)[len(prompt) :]
+            except Exception as e:
+                print(prompt_message)
+                print(e)
+                raise e
         else:
             prompt = apply_chat_template(data[input_key][:-1], tokenize=False, add_generation_prompt=True)
             response = apply_chat_template(data[input_key], tokenize=False)[len(prompt) :]

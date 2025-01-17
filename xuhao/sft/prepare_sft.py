@@ -1,7 +1,7 @@
 import json
 
 from datasets import Dataset, DatasetDict
-from utils import get_grouped_data
+from xuhao.utils import get_grouped_data
 
 verification_result_file = "xuhao/verify/data/output/verification_result_claude_new.json"
 verification_result_label_file = "xuhao/verify/data/output/verification_result_label_claude_new.json"
@@ -84,8 +84,6 @@ def get_sft_data_distribution(sft_dataset_file):
     print("Num Test Data Item: ", len(sft_test_data))
     print("Num Test Data INCORRECT Item: ", num_incorrect_test_item)
 
-
-
 def convert_dataset_format():
     # 读取原始数据
     with open(sft_dataset_file, 'r') as f:
@@ -119,5 +117,6 @@ def convert_dataset_format():
     return dataset_dict
 
 if __name__ == "__main__":
-    prepare_sft_dataset(train_test_ratio=9)
+    # prepare_sft_dataset(train_test_ratio=9)
     convert_dataset_format()
+    get_sft_data_distribution("xuhao/sft/data/input/sft_data_new.json")
