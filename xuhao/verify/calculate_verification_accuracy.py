@@ -113,7 +113,29 @@ def postprocess_eval_result():
             json.dump(verification_result, f, indent=4)
 
 if __name__ == "__main__":
-    get_verification_accuracy_plevel(
-        verification_result_file="xuhao/verify/data/output/verification_result_claude_new.json",
-        solution_label_file="xuhao/solve/data/output/solution_label_new.json",
-        verification_result_label_file="xuhao/verify/data/output/verification_result_label_claude_new.json")
+    # get_verification_result_plevel(
+    #     verification_result_file="xuhao/verify/data/output/verification_result_claude_new.json",
+    #     solution_label_file="xuhao/solve/data/output/solution_label_new.json",
+    #     verification_result_label_file="xuhao/verify/data/output/verification_result_label_claude_new.json")
+    
+    result = get_verification_result_plevel("xuhao/verify/data/output/verification_result_sft_test_new_ckpt2.json", "xuhao/sft_prm/data/input/solution_label_test_new.json")
+    total = sum(result)
+    right = result[0] + result[3]
+    print("Problem Level:")
+    print(result)
+    print("Total: ", total, "Right: ", right, "Acc: ", right / total)
+    print("Positive Recall: ", result[0] / (result[0] + result[1]))
+    print("Negative Recall: ", result[3] / (result[2] + result[3]))
+    print("Positive Precision: ", result[0] / (result[0] + result[2]))
+    print("Negative Precision: ", result[3] / (result[1] + result[3]))
+
+    result = get_verification_result_slevel("xuhao/verify/data/output/verification_result_sft_test_new_ckpt2.json", "xuhao/verify/data/output/verification_result_claude_new.json")
+    total = sum(result)
+    right = result[0] + result[3]
+    print("Step Level:")
+    print(result)
+    print("Total: ", total, "Right: ", right, "Acc: ", right / total)
+    print("Positive Recall: ", result[0] / (result[0] + result[1]))
+    print("Negative Recall: ", result[3] / (result[2] + result[3]))
+    print("Positive Precision: ", result[0] / (result[0] + result[2]))
+    print("Negative Precision: ", result[3] / (result[1] + result[3]))

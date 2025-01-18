@@ -16,24 +16,29 @@ from openrlhf.utils import blending_datasets, get_processor, get_strategy, get_t
 import json
 from torch.utils.data import Dataset
 
+from xuhao.utils import read_json_list_file, write_json_list_file
+
 verification_system_message_file = "/root/OpenRLHF/xuhao/verify/data/input/verification_system_message.txt"
 verification_few_shot_file = "/root/OpenRLHF/xuhao/verify/data/input/verification_few_shot.json"
-chat_template_file = "/root/OpenRLHF/xuhao/sft/data/input/chat_template.txt"
+chat_template_file = "/root/OpenRLHF/xuhao/sft_prm/data/input/chat_template.txt"
 
-def preprocess_data(data, input_key, apply_chat_template) -> str:
+def preprocess_data(data, input_key, apply_chat_template) -> dict:
     with open(verification_system_message_file, 'r') as f1, open(verification_few_shot_file, 'r') as f2:
         system_message = f1.read()
         few_shot_examples = json.load(f2)
 
-    data = data[input_key]
     messages = [{"role": "system", "content": system_message}]
     for example in few_shot_examples:
         messages.append({"role": "user", "content": example["input"]})
         messages.append({"role": "assistant", "content": example["output"]})
-    messages.append({"role": "user", "content": data})
+    messages.append({"role": "user", "content": data[input_key]})
     prompt = apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
 
-    return prompt
+    return {
+        "problem_index": data["problem_index"],
+        "step_index": data["step_index"],
+        "prompt": prompt
+    }
 
 class PromptDataset(Dataset):
     """
@@ -90,8 +95,8 @@ def batch_generate(args):
 
     # configure tokenizer
     tokenizer = get_tokenizer(args.pretrain, model.model, "left", strategy, use_fast=not args.disable_fast_tokenizer)
-    with open(chat_template_file, 'r') as f:
-        tokenizer.chat_template = f.read()
+    # with open(chat_template_file, 'r') as f:
+    #     tokenizer.chat_template = f.read()
 
     # prepare models
     model = strategy.prepare(model)
@@ -141,11 +146,8 @@ def batch_generate(args):
     indexed_outputs = []
 
     for batch_idx, prompts in enumerate(pbar):
-        # 计算当前批次中样本的全局索引
-        start_idx = batch_idx * args.micro_batch_size * dist.get_world_size() + dist.get_rank() * args.micro_batch_size
-        batch_indices = list(range(start_idx, start_idx + len(prompts)))
-
-        inputs = tokenize_fn(prompts)
+        prompt_contents = prompts["prompt"]
+        inputs = tokenize_fn(prompt_contents)
         for _ in range(N):
             outputs = model.model.generate(
                 **inputs,
@@ -164,11 +166,13 @@ def batch_generate(args):
             outputs = tokenizer.batch_decode(outputs[:, input_length:], skip_special_tokens=True)
             for i, output in enumerate(outputs):
                 # 保存索引和输出的对应关系
-                indexed_outputs.append((batch_indices[i], output))
-
-    # 将带索引的结果写入文件
-    with jsonlines.open(args.output_path + str(strategy.get_rank()), mode="w") as writer:
-        writer.write_all(indexed_outputs)
+                indexed_outputs.append({
+                    "problem_index": int(prompts["problem_index"][i]),
+                    "step_index": int(prompts["step_index"][i]),
+                    "verification_result": output
+                })
+    
+    write_json_list_file(args.output_path + str(strategy.get_rank()), indexed_outputs)
 
     dist.barrier()
 
@@ -180,37 +184,25 @@ def batch_generate(args):
         
         # 收集所有结果
         for file in files:
-            with jsonlines.open(file, mode="r") as reader:
-                for obj in reader:
-                    all_outputs.append(obj)
+            all_outputs.extend(read_json_list_file(file))
             os.remove(file)
         
         # 按原始索引排序
-        all_outputs.sort(key=lambda x: x[0])
+        all_outputs.sort(key=lambda x: (x["problem_index"], x["step_index"]))
         
-        # 只保存排序后的输出结果
-        sorted_outputs = [output for _, output in all_outputs]
-        
-        # 写入最终结果
-        result = []
-        for idx, data in enumerate(prompts_data):
-            result.append({
-                "problem_index": data["problem_index"],
-                "step_index": data["step_index"],
-                "verification_result": sorted_outputs[idx]
-            })
         with open(args.output_path, 'w') as f:
-            json.dump(result, f, indent=4)
+            json.dump(all_outputs[:len(prompts_data)], f, indent=4)
 
 if __name__ == "__main__":
-    pretrain = "/mnt/data/user/zhao_jun/xuhao/ckpt"
-    dataset = "/root/OpenRLHF/xuhao/verify/data/input/verification_data_test.json"
-    input_key = "input"
+    pretrain = "/mnt/data/user/zhao_jun/xuhao/ckpt2"
+    dataset = "xuhao/verify/data/input/verification_data_sft_test_new.json"
+    input_key = "verification_input"
     max_samples = 1e8
-    output_path = "/root/OpenRLHF/xuhao/verify/data/output/verification_result_test_llama-3.1-8b-sft-0-result-first.json"
+    output_path = "xuhao/verify/data/output/verification_result_sft_test_new_ckpt2.json"
     prompt_max_length = 4096
     max_new_tokens = 1024
-    train_batch_size = 126
+    micro_batch_size = 8
+    train_batch_size = 32
 
     torch.cuda.empty_cache()
     parser = argparse.ArgumentParser()
@@ -222,8 +214,8 @@ if __name__ == "__main__":
     parser.add_argument("--bf16", action="store_true", default=True, help="Enable bfloat16 for deepspeed")
     parser.add_argument("--flash_attn", action="store_true", default=False, help="Enable FlashAtten2")
     parser.add_argument("--disable_fast_tokenizer", action="store_true", default=False)
-    parser.add_argument("--micro_batch_size", type=int, default=1)
-    parser.add_argument("--train_batch_size", type=int, default=126)
+    parser.add_argument("--micro_batch_size", type=int, default=micro_batch_size)
+    parser.add_argument("--train_batch_size", type=int, default=train_batch_size)
     parser.add_argument("--seed", type=int, default=1234)
 
     # Models

@@ -220,7 +220,7 @@ class SFTTrainer(ABC):
                 for k, v in logs_dict.items():
                     self._tensorboard.add_scalar(f"train/{k}", v, global_step)
         
-        def get_next_eval_gen_file(directory='xuhao/sft/data/output'):
+        def get_next_eval_gen_file(directory='xuhao/sft_am/data/output'):
             import re
             # 获取目录下所有文件
             files = os.listdir(directory)

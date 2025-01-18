@@ -1,5 +1,6 @@
 import json
 from itertools import groupby
+from datasets import load_dataset
 
 def print_item_num(json_file):
     with open(json_file, 'r') as f:
@@ -54,3 +55,44 @@ def get_grouped_data(data):
     ]
     """
     return [list(group) for key, group in groupby(data, key=lambda x: x["problem_index"])]
+
+def blending_datasets(
+    datasets,
+    probabilities,
+    strategy=None,
+    seed=42,
+    max_count=5000000,
+    return_eval=True,
+    stopping_strategy="first_exhausted",
+    train_split="train",
+    eval_split="test",
+):
+    datasets = datasets.split(",")
+    probabilities = list(map(float, probabilities.split(",")))
+    assert len(probabilities) == len(datasets)
+
+    train_data_list = []
+    eval_data_list = []
+    for i, dataset in enumerate(datasets):
+        dataset = dataset.strip()
+        strategy.print(f"dataset: {dataset}")
+
+        data_dir = dataset.split("@")[1].strip() if "@" in dataset else None
+        dataset = dataset.split("@")[0].strip()
+        
+        data = load_dataset(dataset, data_dir=data_dir)
+        strategy.print(f"loaded {dataset} from files")
+
+        if train_split and train_split in data:
+            train_data = data[train_split].select(range(min(max_count, len(data[train_split]))))
+        else:
+            train_data = data.select(range(min(max_count, len(data))))
+        train_data_list.append(train_data)
+
+        if return_eval:
+            if eval_split and eval_split in data:
+                eval_data = data[eval_split].select(range(min(max_count, len(data[eval_split]))))
+            # train will contains eval? TODO
+            else:
+                eval_data = train_data.select(range(min(max_count, int(len(train_data) * 0.03))))
+            eval_data_list.append(eval_data)
