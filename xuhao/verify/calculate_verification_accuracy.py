@@ -1,6 +1,8 @@
 import json
 from itertools import groupby
 import copy
+from xuhao.utils import read_json_list_file, write_json_list_file
+from xuhao.utils import get_grouped_data
 
 def extract_concise_verification_result(verification_result_file = "xuhao/verify/data/output/verification_result_claude.json"):
     with open(verification_result_file, 'r') as f:
@@ -12,27 +14,21 @@ def extract_concise_verification_result(verification_result_file = "xuhao/verify
     for item in grouped_result:
         tmp = []
         for data in item:
-            # assert ("Evaluation Result: CORRECT" in data["verification_result"]) or ("Evaluation Result: INCORRECT" in data["verification_result"])
             tmp.append("INCORRECT" not in data["verification_result"])
         concise_grouped_result.append(tmp)
     
     return concise_grouped_result
 
-def get_verification_accuracy_plevel(
+def get_verification_result_plevel(
         verification_result_file = "xuhao/verify/data/output/verification_result_claude.json",
         solution_label_file = "xuhao/solve/data/output/solution_label.json",
         verification_result_label_file = None):
     concise_verification_result = extract_concise_verification_result(verification_result_file)
-
-    with open(solution_label_file, 'r') as f:
-        solution_label = json.load(f)
+    solution_label = read_json_list_file(solution_label_file)
     
     result = []
     num_right_verification = 0
-    cc = 0
-    ci = 0
-    ic = 0
-    ii = 0
+    cc = ci = ic = ii = 0
     for idx, label in enumerate(solution_label):
         verification_result_label = label["solution_label"] == all(concise_verification_result[idx])
         if verification_result_label:
@@ -50,47 +46,53 @@ def get_verification_accuracy_plevel(
             "verification_result_label": verification_result_label
         })
     
-    print("Problem Num: ", len(solution_label))
-    print("Num Right Verification: ", num_right_verification)
-    print("Verification Accuracy: ", num_right_verification / len(solution_label))
-    print(f"Verify CORRECT Solution to be CORRECT: {cc}")
-    print(f"Verify CORRECT Solution to be INCORRECT: {ci}")
-    print(f"Verify INCORRECT Solution to be CORRECT: {ic}")
-    print(f"Verify INCORRECT Solution to be INCORRECT: {ii}")
+    assert len(solution_label) == (cc + ci + ic + ii)
     
     if verification_result_label_file is not None:
-        with open(verification_result_label_file, 'w') as f:
-            json.dump(result, f, indent=4)
+        write_json_list_file(verification_result_label_file, result)
         print("Verification result label has been written to ", verification_result_label_file)
+    
+    return [cc, ci, ic, ii]
 
-def get_verification_accuracy_slevel(
-        verification_result_file = "xuhao/verify/data/output/verification_result_claude.json"):
-    with open(verification_result_file, 'r') as f:
-        result = json.load(f)
+def get_verification_result_slevel(
+    verification_result_file,
+    ref_verification_result_file):
+    """
+    verification_result_file 是部分 verification
+    ref_verification_result_file 是全部的 verification, 是从 gpt 蒸馏得来的
+    虽然 ref_verification_result_file 中也有错误数据, 但若 verification_result_file 
+    对应的是 sft data, 那么 ref_verification_result_file 中与 verification_result_file 
+    对应的就都是正确的, 因为 sft data 选取的都是蒸馏而来的正确的 verification result
+    """
+    result = read_json_list_file(verification_result_file)
+    ref_result = read_json_list_file(ref_verification_result_file)
+    ref_result = get_grouped_data(ref_result)
 
     num_right_slevel_verification = 0
     cc = ci = ic = ii = 0
     for data in result:
-        v1 = "Evaluation Result: CORRECT" in data["output"]
+        v1 = "Evaluation Result: CORRECT" in ref_result[data["problem_index"]][data["step_index"]]["verification_result"]
         v2 = "Evaluation Result: CORRECT" in data["verification_result"]
         if v1 == v2:
             num_right_slevel_verification += 1
         if v1 and v2:
             cc += 1
         elif v1 and not v2:
-            ci += 2
+            ci += 1
         elif not v1 and v2:
             ic += 1
         else:
             ii += 1
     
-    print("Num SLevel Verifications: ", len(result))
-    print("Num Right SLevel Verifications: ", num_right_slevel_verification)
-    print("SLevel ACC: ", num_right_slevel_verification / len(result))
-    print("Verify CORRECT Step to be CORRECT: ", cc)
-    print("Verify CORRECT Step to be INCORRECT: ", ci)
-    print("Verify INCORRECT Step to be CORRECT: ", ic)
-    print("Verify INCORRECT Step to be INCORRECT: ", ii)
+    # print("Num SLevel Verifications: ", len(result))
+    # print("Num Right SLevel Verifications: ", num_right_slevel_verification)
+    # print("SLevel ACC: ", num_right_slevel_verification / len(result))
+    # print("Verify CORRECT Step to be CORRECT: ", cc)
+    # print("Verify CORRECT Step to be INCORRECT: ", ci)
+    # print("Verify INCORRECT Step to be CORRECT: ", ic)
+    # print("Verify INCORRECT Step to be INCORRECT: ", ii)
+
+    return [cc, ci, ic, ii]
 
 def postprocess_eval_result():
     with open("xuhao/sft/data/input/sft_data.json", 'r') as f:

@@ -1,6 +1,6 @@
 from tkinter import NO
 from xuhao.utils import read_json_list_file, write_json_list_file
-from xuhao.verify.calculate_verification_accuracy import get_verification_accuracy_plevel, get_verification_accuracy_slevel
+from xuhao.verify.calculate_verification_accuracy import get_verification_result_plevel, get_verification_result_slevel
 import csv
 
 def generate_solution_label_test(
@@ -48,7 +48,10 @@ def postprocess_sft_verification_result(
                 "verification_result": verification_result[idx]
             })
         
-        write_json_list_file("verification_result_" + file, new_verification_result)
+        tmp = file.split('/')
+        tmp[-1] = "verification_result_" + tmp[-1]
+        write_file = '/'.join(tmp)
+        write_json_list_file(write_file, new_verification_result)
 
 def analyze_verification_accuracy(
     verification_result_file_list: list, 
@@ -64,8 +67,8 @@ def analyze_verification_accuracy(
     plevel_result = []
     slevel_result = []
     for file in verification_result_file_list:
-        plevel_result.append(get_verification_accuracy_plevel(file, solution_label_file))
-        slevel_result.append(get_verification_accuracy_slevel(file, ref_verification_result_file))
+        plevel_result.append(get_verification_result_plevel(file, solution_label_file))
+        slevel_result.append(get_verification_result_slevel(file, ref_verification_result_file))
     
     for data in plevel_result:
         total = sum(data)
@@ -100,7 +103,15 @@ if __name__ == "__main__":
     #     sft_data_file="xuhao/sft/data/input/sft_data_new.json",
     #     solution_label_test_file="xuhao/sft/data/input/solution_label_test_new.json"
     # )
-    files = [f"xuhao/sft/data/output/eval_step_{i}" for i in range(16)]
-    postprocess_sft_verification_result(
-        sft_verification_result_file_list=files, 
-        sft_data_file="xuhao/sft/data/input/sft_data_new.json")
+    # files = [f"xuhao/sft/data/output/eval_step_{i}.json" for i in range(16)]
+    # postprocess_sft_verification_result(
+    #     sft_verification_result_file_list=files, 
+    #     sft_data_file="xuhao/sft/data/input/sft_data_new.json")
+    
+    files = [f"xuhao/sft/data/output/verification_result_eval_step_{i}.json" for i in range(16)]
+    analyze_verification_accuracy(
+        files, 
+        solution_label_file="xuhao/sft/data/input/solution_label_test_new.json",
+        ref_verification_result_file="xuhao/verify/data/output/verification_result_claude_new.json",
+        plevel_csv_result_file="xuhao/sft/data/output/plevel_acc_change.csv",
+        slevel_csv_result_file="xuhao/sft/data/output/slevel_acc_change.csv")
