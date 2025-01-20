@@ -1,19 +1,14 @@
 import argparse
 import os
 from datetime import timedelta
-from tkinter import NO
-from turtle import pos
 
 import jsonlines
-from numpy import append
 import torch
 from torch import distributed as dist
 from tqdm import tqdm
-from transformers import AutoTokenizer
 
-from openrlhf.datasets import SFTDataset
-from openrlhf.models import Actor, get_llm_for_sequence_regression
-from openrlhf.utils import get_processor, get_strategy, get_tokenizer
+from openrlhf.models import Actor
+from openrlhf.utils import get_strategy, get_tokenizer
 
 import json
 from torch.utils.data import Dataset
@@ -21,7 +16,7 @@ from torch.utils.data import Dataset
 from xuhao.utils import blending_datasets
 
 home_dir = "/root"
-solution_system_message_file = f"{home_dir}/OpenRLHF/xuhao/sft_am/data/input/system_message.txt"
+solution_system_message_file = f"{home_dir}/OpenRLHF/xuhao/solve/data/input/solution_system_message.txt"
 solution_few_shot_file = f"{home_dir}/OpenRLHF/xuhao/sft_am/data/input/few_shot.json"
 
 def preprocess_data(data, input_key, apply_chat_template) -> str:
@@ -163,7 +158,7 @@ def batch_generate(args):
                 eos_token_id=tokenizer.eos_token_id,
             )
             input_length = inputs["input_ids"].shape[1]
-            outputs = tokenizer.batch_decode(outputs[:, input_length:], skip_special_tokens=True)
+            outputs = tokenizer.batch_decode(outputs[:, input_length:], skip_special_tokens=False)
             for i, output in enumerate(outputs):
                 # 保存索引和输出的对应关系
                 indexed_outputs.append((batch_indices[i], output))
@@ -197,12 +192,12 @@ def batch_generate(args):
             json.dump(sorted_outputs, f, indent=4)
 
 def main():
-    pretrain = "/mnt/data/models/pretrain_models/Meta-Llama-3.1/Meta-Llama-3.1-8B-Instruct"
+    pretrain = "/mnt/data/user/zhao_jun/xuhao/actor-llama-3.1-8b-sft-gsm8k"
     dataset = "openai/gsm8k"
     input_key = "question"
     max_samples = 1e8
     output_path = f"{home_dir}/OpenRLHF/xuhao/solve/data/output/solution_llama-instruct_gsm8k-train.json"
-    prompt_max_length = 2048
+    prompt_max_length = 4096
     max_new_tokens = 1024
     micro_batch_size = 8
     train_batch_size = 32

@@ -1,5 +1,6 @@
 import json
 from itertools import groupby
+from unittest import result
 from datasets import interleave_datasets, load_dataset
 import re
 
@@ -142,3 +143,72 @@ def get_solve_result(solution: list, ref_solution: list):
         else:
             num_correct += 1
     return [num_correct, num_incorrect]
+
+def get_steps(solution: str):
+    """
+    """
+    steps = solution.strip().split('\n')
+    result = []
+    for step in steps:
+        if step:
+            result.append(step)
+    return result[:-1] if "####" in result[-1] else result
+
+def get_final_value_from_solution(solution: str) -> float | None:
+    content = solution.split("####")[-1] if "####" in solution else solution.split('\n')[-1]
+    content = content.strip()
+    numbers = find_numbers(content)
+    return None if not numbers else numbers[0]
+
+def find_newline_indices(s):
+    indices = []
+    for i, char in enumerate(s):
+        if char == '\n':
+            # 如果是第一个 '\n' 或与前一个字符不连续
+            if i == 0 or s[i - 1] != '\n':
+                indices.append(i)
+    return indices
+
+def find_numbers(text: str):
+    pattern = r'-?(?:\d*\.?\d+|\.\d+)(?:,\d{3})*'
+    res = re.findall(pattern, text)
+    res = [float(x.replace(',', '')) for x in res]
+    return res
+
+def group_elements(elements, group_sizes):
+    """
+    将列表 elements 中的元素按照 group_sizes 中指定的分组大小分组。
+
+    参数:
+        elements (list): 待分组的元素列表，其长度必须等于 sum(group_sizes)。
+        group_sizes (list of int): 每组需要的元素个数列表，总和应与 elements 的长度相等。
+
+    返回:
+        list of list: 分组后的列表，每个子列表的长度对应 group_sizes 中的值。
+
+    示例:
+        >>> elements = [1, 2, 3, 4, 5, 6]
+        >>> group_sizes = [2, 1, 3]
+        >>> group_elements(elements, group_sizes)
+        [[1, 2], [3], [4, 5, 6]]
+    """
+    if len(elements) != sum(group_sizes):
+        raise ValueError("元素总数必须等于 group_sizes 中数字的和。")
+    
+    result = []
+    start_index = 0
+    for size in group_sizes:
+        # 切片得到当前组
+        group = elements[start_index : start_index + size]
+        result.append(group)
+        start_index += size
+
+    return result
+
+def solution_end_is_valid(solution: str):
+    steps = solution.split('\n')
+    last_step = steps[-1].strip()
+    if not (re.match(r"^####\s*-?[\d,]*(\.[\d,]+)?$", last_step) or re.match(r"^####\s+None$", last_step)):
+        return False
+    
+    return True

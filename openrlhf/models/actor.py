@@ -128,7 +128,7 @@ class Actor(nn.Module):
             "top_k": kwargs.get("top_k", None),
             "top_p": kwargs.get("top_p", None),
             "do_sample": kwargs.get("do_sample", True),
-            "early_stopping": True,
+            "early_stopping": False,
             "temperature": kwargs.get("temperature", 1),
             "use_cache": True,
             "num_beams": kwargs.get("num_beams", 1),
@@ -136,6 +136,7 @@ class Actor(nn.Module):
             "eos_token_id": kwargs.get("eos_token_id"),
             "pad_token_id": kwargs.get("pad_token_id"),
             "min_new_tokens": kwargs.get("min_new_tokens", 1),
+            "repetition_penalty": kwargs.get("repetition_penalty", 1.0)
         }
 
         if kwargs.get("max_new_tokens", None):
