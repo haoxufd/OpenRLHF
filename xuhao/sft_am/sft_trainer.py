@@ -220,7 +220,7 @@ class SFTTrainer(ABC):
                 for k, v in logs_dict.items():
                     self._tensorboard.add_scalar(f"train/{k}", v, global_step)
         
-        def get_next_eval_gen_file(directory='xuhao/sft_prm/data/output'):
+        def get_next_eval_gen_file(directory='xuhao/sft_am/data/output'):
             import re
             # 获取目录下所有文件
             files = os.listdir(directory)
@@ -237,10 +237,10 @@ class SFTTrainer(ABC):
             
             # 如果没有找到匹配的文件，返回 0
             if not step_numbers:
-                return "xuhao/sft/data/output/eval_step_0.json"
+                return "xuhao/sft_am/data/output/eval_step_0.json"
             
             # 否则返回最大编号 + 1
-            return "xuhao/sft_prm/data/output/eval_step_{}.json".format(max(step_numbers)+1)
+            return "xuhao/sft_am/data/output/eval_step_{}.json".format(max(step_numbers)+1)
 
         # eval
         if global_step % args.eval_steps == 0:

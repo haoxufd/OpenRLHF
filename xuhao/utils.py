@@ -1,6 +1,7 @@
 import json
 from itertools import groupby
-from datasets import load_dataset
+from datasets import interleave_datasets, load_dataset
+import re
 
 def print_item_num(json_file):
     with open(json_file, 'r') as f:
@@ -80,7 +81,7 @@ def blending_datasets(
         data_dir = dataset.split("@")[1].strip() if "@" in dataset else None
         dataset = dataset.split("@")[0].strip()
         
-        data = load_dataset(dataset, data_dir=data_dir)
+        data = load_dataset(dataset, "main")
         strategy.print(f"loaded {dataset} from files")
 
         if train_split and train_split in data:
@@ -96,3 +97,48 @@ def blending_datasets(
             else:
                 eval_data = train_data.select(range(min(max_count, int(len(train_data) * 0.03))))
             eval_data_list.append(eval_data)
+        
+        # merge datasets
+    if strategy.is_rank_0():
+        print(train_data_list)
+
+    train_dataset = interleave_datasets(
+        train_data_list,
+        probabilities=probabilities,
+        seed=seed,
+        stopping_strategy=stopping_strategy,
+    )
+    if return_eval:
+        eval_dataset = interleave_datasets(
+            eval_data_list,
+            probabilities=probabilities,
+            seed=seed,
+            stopping_strategy=stopping_strategy,
+        )
+        return train_dataset, eval_dataset
+    else:
+        return train_dataset
+
+def get_solve_result(solution: list, ref_solution: list):
+    """
+    由于是通过 batch inference 得到的 solution, 其中的数据可能多于 ref_solution
+    但两者数据是按顺序对应的, 遍历的时候以 ref_solution 为主即可
+    """
+    num_correct = num_incorrect = 0
+    for i in range(len(ref_solution)):
+        answer = solution[i]
+        ref_answer = ref_solution[i]
+        
+        value = re.findall(r'#### ([+-]?[\d,]*\.?[\d,]+)', answer)
+        value = value[0].replace(',', '') if len(value) > 0 else None
+        ref_value = re.findall(r'#### ([+-]?[\d,]*\.?[\d,]+)', ref_answer)
+        assert len(ref_value) > 0
+        ref_value = ref_value[0].replace(',', '')
+
+        if value is None:
+            num_incorrect += 1
+        elif value is not None and float(value) != float(ref_value):
+            num_incorrect += 1
+        else:
+            num_correct += 1
+    return [num_correct, num_incorrect]

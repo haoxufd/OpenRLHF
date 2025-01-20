@@ -13,14 +13,16 @@ from transformers import AutoTokenizer
 
 from openrlhf.datasets import SFTDataset
 from openrlhf.models import Actor, get_llm_for_sequence_regression
-from openrlhf.utils import blending_datasets, get_processor, get_strategy, get_tokenizer
+from openrlhf.utils import get_processor, get_strategy, get_tokenizer
 
 import json
 from torch.utils.data import Dataset
 
-home_dir = "/home/user"
-solution_system_message_file = f"{home_dir}/OpenRLHF/xuhao/solve/data/input/solution_system_message.txt"
-solution_few_shot_file = f"{home_dir}/OpenRLHF/xuhao/solve/data/input/solution_few_shot.json"
+from xuhao.utils import blending_datasets
+
+home_dir = "/root"
+solution_system_message_file = f"{home_dir}/OpenRLHF/xuhao/sft_am/data/input/system_message.txt"
+solution_few_shot_file = f"{home_dir}/OpenRLHF/xuhao/sft_am/data/input/few_shot.json"
 
 def preprocess_data(data, input_key, apply_chat_template) -> str:
     with open(solution_system_message_file, 'r') as f1, open(solution_few_shot_file, 'r') as f2:
@@ -189,21 +191,22 @@ def batch_generate(args):
         all_outputs.sort(key=lambda x: x[0])
         
         # 只保存排序后的输出结果
-        sorted_outputs = [{"solution": output} for _, output in all_outputs]
+        sorted_outputs = [output for _, output in all_outputs]
         
         with open(args.output_path, 'w') as f:
             json.dump(sorted_outputs, f, indent=4)
 
 def main():
-    pretrain = "/home/user/models/Qwen2.5-1.5B-Instruct"
-    dataset = f"{home_dir}/OpenRLHF/xuhao/solve/data/input/gsm8k-1.json"
-    input_key = "problem"
+    pretrain = "/mnt/data/models/pretrain_models/Meta-Llama-3.1/Meta-Llama-3.1-8B-Instruct"
+    dataset = "openai/gsm8k"
+    input_key = "question"
     max_samples = 1e8
-    output_path = f"{home_dir}/OpenRLHF/xuhao/solve/data/output/solution-1.json"
+    output_path = f"{home_dir}/OpenRLHF/xuhao/solve/data/output/solution_llama-instruct_gsm8k-train.json"
     prompt_max_length = 2048
     max_new_tokens = 1024
-    micro_batch_size = 4
-    train_batch_size = 12
+    micro_batch_size = 8
+    train_batch_size = 32
+    dataset_split = "train"
 
     torch.cuda.empty_cache()
     parser = argparse.ArgumentParser()
@@ -228,7 +231,7 @@ def main():
     # Custom dataset
     parser.add_argument("--dataset", type=str, default=dataset)
     parser.add_argument("--dataset_probs", type=str, default="1.0")
-    parser.add_argument("--dataset_split", type=str, default="train")
+    parser.add_argument("--dataset_split", type=str, default=dataset_split)
     parser.add_argument("--input_key", type=str, default=input_key, help="JSON dataset key")
     parser.add_argument("--output_key", type=str, default=None, help="JSON dataset key")
     parser.add_argument(
@@ -420,3 +423,4 @@ if __name__ == "__main__":
     #     solution_label_file_2="xuhao/solve/data/output/solution_label-1.json")
     
     # print_item_num("xuhao/solve/data/output/solution.json")
+    main()

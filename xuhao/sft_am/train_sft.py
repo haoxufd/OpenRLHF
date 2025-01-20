@@ -5,12 +5,12 @@ from datetime import datetime
 
 from transformers.trainer import get_scheduler
 
-from .sft_dataset import SFTDataset
+from xuhao.sft_am.sft_dataset import SFTDataset
 from openrlhf.models import Actor
-from openrlhf.trainer import SFTTrainer
+from xuhao.sft_am.sft_trainer import SFTTrainer
 from openrlhf.utils import get_strategy, get_tokenizer
 
-from .prompt_dataset import PromptDataset
+from xuhao.sft_am.prompt_dataset import PromptDataset
 from xuhao.utils import blending_datasets
 
 
@@ -160,15 +160,15 @@ def train(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
-    eval_steps = 80
-    eval_acc_steps = 80
+    eval_steps = 25
+    eval_acc_steps = 25
     pretrain = "/mnt/data/models/pretrain_models/Meta-Llama-3.1/Meta-Llama-3.1-8B"
     max_samples = 1e8
     dataset = "openai/gsm8k"
     load_checkpoint = False
     max_epoches = 2
-    input_key = "problem"
-    output_key = "solution"
+    input_key = "question"
+    output_key = "answer"
     save_path = "/mnt/data/user/zhao_jun/xuhao/ckpt-am-1"
     ckpt_path = "/mnt/data/user/zhao_jun/xuhao/ckpt-am-1/checkpoints_sft"
 

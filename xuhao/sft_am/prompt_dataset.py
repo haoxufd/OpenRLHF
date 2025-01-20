@@ -15,8 +15,8 @@ def preprocess_data(data, input_key, apply_chat_template) -> str:
     data = data[input_key]
     chat = [{"role": "system", "content": system_message}]
     for example in few_shot_examples:
-        chat.append({"role": "user", "content": example["input"]})
-        chat.append({"role": "assistant", "content": example["output"]})
+        chat.append({"role": "user", "content": example["problem"]})
+        chat.append({"role": "assistant", "content": example["solution"]})
     chat.append({"role": "user", "content": data})
     prompt = apply_chat_template(chat, tokenize=False, add_generation_prompt=True)
     return prompt
