@@ -1,19 +1,14 @@
 import argparse
 import os
 from datetime import timedelta
-from tkinter import NO
-from turtle import pos
 
 import jsonlines
-from numpy import append
 import torch
 from torch import distributed as dist
 from tqdm import tqdm
-from transformers import AutoTokenizer
 
-from openrlhf.datasets import SFTDataset
-from openrlhf.models import Actor, get_llm_for_sequence_regression
-from openrlhf.utils import get_processor, get_strategy, get_tokenizer
+from openrlhf.models import Actor
+from openrlhf.utils import get_strategy, get_tokenizer
 
 import json
 from torch.utils.data import Dataset
