@@ -246,7 +246,8 @@ class NaiveExperienceMaker(ABC):
     
     def is_valid(self, solution: str):
         steps = solution.split('\n')
-        if not re.match(r"^####\s+-?\d+(\.\d+)?$", steps[-1].strip()):
+        last_step = steps[-1].strip()
+        if not (re.match(r"^####\s+-?\d+(\.\d+)?$", last_step) or re.match(r"^####\s+None$", last_step)):
             return False
         
         return True

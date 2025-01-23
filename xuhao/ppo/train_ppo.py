@@ -290,8 +290,8 @@ if __name__ == "__main__":
     prompt_data = "openai/gsm8k"
     micro_train_batch_size = 1
     train_batch_size = micro_train_batch_size * torch.cuda.device_count()
-    micro_rollout_batch_size = 2
-    rollout_batch_size = micro_rollout_batch_size * torch.cuda.device_count()
+    micro_rollout_batch_size = 1
+    rollout_batch_size = micro_rollout_batch_size * torch.cuda.device_count() * 2
 
     gradient_checkpointing = True
     bf16 = True
