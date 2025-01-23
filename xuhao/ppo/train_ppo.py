@@ -285,13 +285,17 @@ def train(args):
 
 if __name__ == "__main__":
     save_value_network = False
-    pretrain = "/mnt/data/user/zhao_jun/xuhao/actor-llama-3.1-8b-sft-gsm8k"
-    reward_pretrain = "/mnt/data/user/zhao_jun/xuhao/reward-llama-3.1-8b-sft-gsm8k"
+    pretrain = "/home/user/models/Qwen2.5-1.5B-Instruct"
+    reward_pretrain = "/home/user/models/Qwen2.5-1.5B-Instruct"
     prompt_data = "openai/gsm8k"
-    micro_train_batch_size = 4
-    train_batch_size = 16
-    micro_rollout_batch_size = 4
-    rollout_batch_size = 64
+    micro_train_batch_size = 1
+    train_batch_size = micro_train_batch_size * torch.cuda.device_count()
+    micro_rollout_batch_size = 2
+    rollout_batch_size = micro_rollout_batch_size * torch.cuda.device_count()
+
+    gradient_checkpointing = True
+    bf16 = True
+    generate_max_len = 512
 
     parser = argparse.ArgumentParser()
     # Checkpoint
@@ -307,10 +311,10 @@ if __name__ == "__main__":
     # PPO
     parser.add_argument("--num_episodes", type=int, default=1)
     parser.add_argument("--rollout_batch_size", type=int, default=rollout_batch_size)
-    parser.add_argument("--micro_rollout_batch_size", type=int, default=micro_train_batch_size)
+    parser.add_argument("--micro_rollout_batch_size", type=int, default=micro_rollout_batch_size)
     parser.add_argument("--max_epochs", type=int, default=1)
     parser.add_argument("--prompt_max_len", type=int, default=1024, help="Max tokens for each prompt")
-    parser.add_argument("--generate_max_len", type=int, default=1024, help="Max tokens to generate in PPO")
+    parser.add_argument("--generate_max_len", type=int, default=generate_max_len, help="Max tokens to generate in PPO")
     parser.add_argument("--max_len", type=int, default=None, help="deprecated max_len")
     parser.add_argument("--max_samples", type=int, default=1000000)
     parser.add_argument("--max_norm", type=float, default=1.0, help="Gradient clipping")
@@ -351,8 +355,8 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--local_rank", type=int, default=-1, help="local_rank for deepspeed")
     parser.add_argument("--zero_stage", type=int, default=2, help="DeepSpeed ZeRO stage")
-    parser.add_argument("--gradient_checkpointing", action="store_true", default=False)
-    parser.add_argument("--bf16", action="store_true", default=False, help="Enable bfloat16")
+    parser.add_argument("--gradient_checkpointing", action="store_true", default=gradient_checkpointing)
+    parser.add_argument("--bf16", action="store_true", default=bf16, help="Enable bfloat16")
     parser.add_argument("--enable_ema", action="store_true", help="Enable EMA checkpoint for the model.")
     parser.add_argument("--zpg", type=int, default=1, help="ZeRO++ max partition size")
     parser.add_argument("--adam_offload", action="store_true", default=True, help="Offload Adam Optimizer")

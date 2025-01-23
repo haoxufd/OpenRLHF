@@ -2,12 +2,16 @@ import time
 from abc import ABC
 from copy import deepcopy
 from dataclasses import dataclass
+from tkinter import NO
 from typing import List, Optional, Tuple, Union
 
+from numpy import dtype
 import ray
 import torch
 import torch.nn as nn
 from tqdm import tqdm
+
+import re
 
 from openrlhf.models.actor import Actor
 from openrlhf.models.utils import compute_approx_kl, compute_reward, masked_mean, unpacking_samples
@@ -113,6 +117,9 @@ class Samples:
     packed_seq_lens: Optional[torch.Tensor]
     response_length: torch.Tensor
     total_length: torch.Tensor
+    problem_list: list[str]
+    previous_steps_list: list[str]
+    step_list: list[str]
 
 
 class NaiveExperienceMaker(ABC):
@@ -236,6 +243,97 @@ class NaiveExperienceMaker(ABC):
             del experience.info["num_actions"]
             experience.to_device("cpu")
         return experiences
+    
+    def is_valid(self, solution: str):
+        steps = solution.split('\n')
+        if not re.match(r"^####\s+-?\d+(\.\d+)?$", steps[-1].strip()):
+            return False
+        
+        return True
+    
+    def expand_a_sequence(
+        self, 
+        sequence: torch.Tensor, 
+        text: str,
+        attention_mask: torch.Tensor, 
+        action_mask: torch.Tensor):
+        """
+        由一个 sequence 得到 x 个 sub_sequence, 每个 sub_sequence 都有对应的 attention_mask, action_mask, problem, previous_steps 和 step_to_evaluate
+        """
+        special_token_content = {
+            "im_start": "<|im_start|>",
+            "im_end": "<|im_end|>",
+            "text_start": "<|beginoftext|>",
+            "text_end": "<|endoftext|>"
+        }
+        tmp = text.split(special_token_content["im_start"]+"user")[-1]
+        problem = tmp.split(special_token_content["im_end"])[0].strip()
+        sol_start_content = special_token_content["im_start"] + "assistant"
+        sol_end_content = special_token_content["im_end"]
+        sol_start_idx = tmp.find(sol_start_content) + len(sol_start_content)
+        sol_end_idx = tmp.find(sol_end_content, sol_start_idx + len(sol_start_content))
+        solution = tmp[sol_start_idx: sol_end_idx].strip()
+
+        # Check solution. If not valid, drop this sequence
+        if not self.is_valid(solution):
+            return []
+
+        # Divide solution into steps
+        steps = []
+        for step in solution.split('\n'):
+            if step.strip():
+                steps.append(step)
+        assert steps[-1].startswith("####")
+        assert len(steps) > 1
+        steps[-2] = steps[-2] + "\n" + steps[-1]
+        steps = steps[:-1]
+        
+        result = []
+        previous_steps = []
+        for step in steps:
+            sub_sequence = self.tokenizer.encode(text[:text.find(step) + len(step)] + special_token_content["im_end"])
+            sub_sequence_text = self.tokenizer.decode(sub_sequence, skip_special_tokens=False)
+            
+            response_len = len(sub_sequence) - (sequence.size(0) - action_mask.size(0))
+            action_msk = action_mask.clone()
+            action_msk[response_len:] = False
+
+            attention_msk = attention_mask.clone()
+            attention_msk[len(sub_sequence):] = 0
+
+            padding_len = sequence.size(0) - len(sub_sequence)
+            sub_sequence += [self.tokenizer.eos_token_id] * padding_len
+            
+            value_position = step.find("####")
+            if value_position >= 0:
+                step = step[:value_position]
+            result.append((
+                sub_sequence, attention_msk, action_msk, problem, previous_steps[:], step
+            ))
+
+            previous_steps.append(step)
+
+        return result
+
+    def expand_sequences(self, sequences: torch.Tensor, texts: list, attention_mask: torch.Tensor, action_mask: torch.Tensor):
+        """
+        """
+        n = sequences.size(0)
+
+        result = []
+        for i in range(n):
+            result.extend(self.expand_a_sequence(sequences[i], texts[i], attention_mask[i], action_mask[i]))
+        
+        assert self.strategy is not None
+        rank = self.strategy.get_rank()
+        sequences = torch.tensor([x[0] for x in result], dtype=sequences.dtype).to(device=rank)
+        attention_mask = torch.stack([x[1] for x in result]).to(device=rank) if len(result) > 0 else torch.empty(0, dtype=attention_mask.dtype).to(device=rank)
+        action_mask = torch.stack([x[2] for x in result]).to(device=rank) if len(result) > 0 else torch.empty(0, dtype=action_mask.dtype).to(device=rank)
+        problem = [x[3] for x in result]
+        previous_steps = [x[4] for x in result]
+        step = [x[5] for x in result]
+
+        return sequences, attention_mask, action_mask, problem, previous_steps, step
 
     @torch.no_grad()
     def generate_samples(self, all_prompts: List[str], **generate_kwargs) -> List[Samples]:
@@ -252,16 +350,25 @@ class NaiveExperienceMaker(ABC):
             prompts = all_prompts[i : i + args.micro_rollout_batch_size]
             inputs = self.tokenize_fn(prompts, self.prompt_max_len, device="cuda")
             sequences, attention_mask, action_mask = self.actor.generate(**inputs, **generate_kwargs)
-            samples = Samples(
-                sequences=sequences,
-                attention_mask=attention_mask,
-                action_mask=action_mask,
-                num_actions=action_mask.size(1),
-                packed_seq_lens=None,
-                response_length=action_mask.float().sum(dim=-1),
-                total_length=attention_mask.float().sum(dim=-1),
+            texts = self.tokenizer.batch_decode(sequences, skip_special_tokens=False)
+            new_sequences, new_attention_mask, new_action_mask, problem, previous_steps, step = self.expand_sequences(
+                sequences, texts, attention_mask, action_mask
             )
-            samples_list.append(samples)
+            new_texts = self.tokenizer.batch_decode(new_sequences, skip_special_tokens=False)
+            if new_sequences.size(0) > 0:
+                samples = Samples(
+                    sequences=new_sequences,
+                    attention_mask=new_attention_mask,
+                    action_mask=new_action_mask,
+                    num_actions=new_action_mask.size(1),
+                    packed_seq_lens=None,
+                    response_length=new_action_mask.float().sum(dim=-1),
+                    total_length=new_attention_mask.float().sum(dim=-1),
+                    problem_list=problem,
+                    previous_steps_list=previous_steps,
+                    step_list=step
+                )
+                samples_list.append(samples)
         return samples_list
 
     @torch.no_grad()
@@ -302,6 +409,7 @@ class NaiveExperienceMaker(ABC):
         else:
             # local RM
             r = self.reward_model(sequences, attention_mask)
+            # r = torch.cat((r, torch.tensor([1]).cuda(torch.cuda.current_device())))
 
         kl = compute_approx_kl(
             action_log_probs,

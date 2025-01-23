@@ -2,7 +2,7 @@ import json
 from torch.utils.data import Dataset
 from tqdm import tqdm
 
-home_dir = "/root"
+home_dir = "/home/user"
 solution_system_message_file = f"{home_dir}/OpenRLHF/xuhao/sft_am/data/input/system_message.txt"
 solution_few_shot_file = f"{home_dir}/OpenRLHF/xuhao/sft_am/data/input/few_shot.json"
 
