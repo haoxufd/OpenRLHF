@@ -285,8 +285,11 @@ def train(args):
 
 if __name__ == "__main__":
     save_value_network = False
-    pretrain = "/home/user/models/Qwen2.5-1.5B-Instruct"
-    reward_pretrain = "/home/user/models/Qwen2.5-1.5B-Instruct"
+    qwen = "/mnt/data/models/pretrain_models/Qwen2.5-1.5B-Instruct"
+    llama_actor = "/mnt/data/user/zhao_jun/xuhao/actor-llama-3.1-8b-sft-gsm8k"
+    llama_reward = "/mnt/data/models/pretrain_models/Meta-Llama-3.1/Meta-Llama-3.1-8B-Instruct"
+    pretrain = qwen
+    reward_pretrain = qwen
     prompt_data = "openai/gsm8k"
     micro_train_batch_size = 1
     train_batch_size = micro_train_batch_size * torch.cuda.device_count()

@@ -286,6 +286,8 @@ class NaiveExperienceMaker(ABC):
                 steps.append(step)
         assert steps[-1].startswith("####")
         assert len(steps) > 1
+        # TODO: Maybe \n\n####?
+        # 改变处理方式, steps[-1] 不加 #### 后缀, for 循环中判断如果是最后一次 step, 直接让 sub_sequence = sequence
         steps[-2] = steps[-2] + "\n" + steps[-1]
         steps = steps[:-1]
         
@@ -294,6 +296,7 @@ class NaiveExperienceMaker(ABC):
         for step in steps:
             sub_sequence = self.tokenizer.encode(text[:text.find(step) + len(step)] + special_token_content["im_end"])
             sub_sequence_text = self.tokenizer.decode(sub_sequence, skip_special_tokens=False)
+            sequence_text = self.tokenizer.decode(sequence, skip_special_tokens=False)
             
             response_len = len(sub_sequence) - (sequence.size(0) - action_mask.size(0))
             action_msk = action_mask.clone()
@@ -313,7 +316,12 @@ class NaiveExperienceMaker(ABC):
             ))
 
             previous_steps.append(step)
-
+        sub_sequences = [x[0] for x in result]
+        last_sub_seq = sub_sequences[-1]
+        sequence_l = [int(x) for x in sequence.tolist()]
+        assert last_sub_seq == sequence_l
+        lens = [len(x) for x in sub_sequences]
+        assert all(x == lens[0] for x in lens)
         return result
 
     def expand_sequences(self, sequences: torch.Tensor, texts: list, attention_mask: torch.Tensor, action_mask: torch.Tensor):
