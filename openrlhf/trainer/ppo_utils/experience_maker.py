@@ -286,36 +286,35 @@ class NaiveExperienceMaker(ABC):
                 steps.append(step)
         assert steps[-1].startswith("####")
         assert len(steps) > 1
-        # TODO: Maybe \n\n####?
-        # 改变处理方式, steps[-1] 不加 #### 后缀, for 循环中判断如果是最后一次 step, 直接让 sub_sequence = sequence
-        steps[-2] = steps[-2] + "\n" + steps[-1]
-        steps = steps[:-1]
         
         result = []
         previous_steps = []
-        for step in steps:
-            sub_sequence = self.tokenizer.encode(text[:text.find(step) + len(step)] + special_token_content["im_end"])
-            sub_sequence_text = self.tokenizer.decode(sub_sequence, skip_special_tokens=False)
-            sequence_text = self.tokenizer.decode(sequence, skip_special_tokens=False)
-            
-            response_len = len(sub_sequence) - (sequence.size(0) - action_mask.size(0))
-            action_msk = action_mask.clone()
-            action_msk[response_len:] = False
+        for i in range(len(steps) - 1):
+            step = steps[i]
+            if i < len(steps) - 2:
+                sub_sequence = self.tokenizer.encode(text[:text.find(step) + len(step)] + special_token_content["im_end"])
+                sub_sequence_text = self.tokenizer.decode(sub_sequence, skip_special_tokens=False)
+                
+                response_len = len(sub_sequence) - (sequence.size(0) - action_mask.size(0))
+                action_msk = action_mask.clone()
+                action_msk[response_len:] = False
 
-            attention_msk = attention_mask.clone()
-            attention_msk[len(sub_sequence):] = 0
+                attention_msk = attention_mask.clone()
+                attention_msk[len(sub_sequence):] = 0
 
-            padding_len = sequence.size(0) - len(sub_sequence)
-            sub_sequence += [self.tokenizer.eos_token_id] * padding_len
+                padding_len = sequence.size(0) - len(sub_sequence)
+                sub_sequence += [self.tokenizer.eos_token_id] * padding_len
+            else:
+                # i = len(steps) - 2, last step
+                sub_sequence = sequence
+                action_msk = action_mask
+                attention_msk = attention_mask
             
-            value_position = step.find("####")
-            if value_position >= 0:
-                step = step[:value_position]
             result.append((
                 sub_sequence, attention_msk, action_msk, problem, previous_steps[:], step
             ))
-
             previous_steps.append(step)
+
         sub_sequences = [x[0] for x in result]
         last_sub_seq = sub_sequences[-1]
         sequence_l = [int(x) for x in sequence.tolist()]
