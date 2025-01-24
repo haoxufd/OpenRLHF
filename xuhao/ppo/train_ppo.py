@@ -26,11 +26,11 @@ def train(args):
         args.pretrain,
         use_flash_attention_2=args.flash_attn,
         bf16=args.bf16,
-        load_in_4bit=args.load_in_4bit,
-        lora_rank=args.lora_rank,
-        lora_alpha=args.lora_alpha,
-        target_modules=args.target_modules,
-        lora_dropout=args.lora_dropout,
+        # load_in_4bit=args.load_in_4bit,
+        # lora_rank=args.lora_rank,
+        # lora_alpha=args.lora_alpha,
+        # target_modules=args.target_modules,
+        # lora_dropout=args.lora_dropout,
         ds_config=strategy.get_ds_train_config(is_actor=True),
     )
 
@@ -57,25 +57,33 @@ def train(args):
         critic = None
 
     if not args.remote_rm_url:
-        reward_model = get_llm_for_sequence_regression(
+        # reward_model = get_llm_for_sequence_regression(
+        #     args.reward_pretrain,
+        #     "reward",
+        #     normalize_reward=args.normalize_reward,
+        #     use_flash_attention_2=args.flash_attn,
+        #     bf16=args.bf16,
+        #     load_in_4bit=args.load_in_4bit,
+        #     ds_config=strategy.get_ds_train_config(is_actor=False),
+        #     value_head_prefix=args.value_head_prefix,
+        # )
+        reward_model = Actor(
             args.reward_pretrain,
-            "reward",
-            normalize_reward=args.normalize_reward,
             use_flash_attention_2=args.flash_attn,
-            bf16=args.bf16,
-            load_in_4bit=args.load_in_4bit,
-            ds_config=strategy.get_ds_train_config(is_actor=False),
-            value_head_prefix=args.value_head_prefix,
+            bf16=args.bf16
         )
+        reward_model = strategy.prepare(reward_model)
+        reward_model.eval()
     else:
         reward_model = None
 
     strategy.print("reward normalization status: {}".format(args.normalize_reward))
-    if reward_model:
-        strategy.print("mean: {}, std {}".format(reward_model.mean, reward_model.std))
+    # if reward_model:
+    #     strategy.print("mean: {}, std {}".format(reward_model.mean, reward_model.std))
 
     strategy.print(actor)
     strategy.print(critic)
+    strategy.print(reward_model)
 
     # configure tokenizer
     tokenizer = get_tokenizer(args.pretrain, actor.model, "left", strategy, use_fast=not args.disable_fast_tokenizer)
@@ -247,8 +255,8 @@ def train(args):
         prompt_max_len=args.prompt_max_len,
         value_clip=args.value_clip,
         eps_clip=args.eps_clip,
-        gamma=args.gamma,
-        lambd=args.lambd,
+        # gamma=args.gamma,
+        # lambd=args.lambd,
         init_kl_coef=args.init_kl_coef,
         kl_target=args.kl_target,
         ema_beta=0.992,
@@ -287,13 +295,13 @@ if __name__ == "__main__":
     save_value_network = False
     qwen = "/mnt/data/models/pretrain_models/Qwen2.5-1.5B-Instruct"
     llama_actor = "/mnt/data/user/zhao_jun/xuhao/actor-llama-3.1-8b-sft-gsm8k"
-    llama_reward = "/mnt/data/models/pretrain_models/Meta-Llama-3.1/Meta-Llama-3.1-8B-Instruct"
+    llama_reward = "/mnt/data/user/zhao_jun/xuhao/reward-llama-3.1-8b-sft-gsm8k"
     pretrain = llama_actor
     reward_pretrain = llama_reward
     prompt_data = "openai/gsm8k"
-    micro_train_batch_size = 1
+    micro_train_batch_size = 4
     train_batch_size = micro_train_batch_size * torch.cuda.device_count()
-    micro_rollout_batch_size = 1
+    micro_rollout_batch_size = 2
     rollout_batch_size = micro_rollout_batch_size * torch.cuda.device_count() * 2
 
     gradient_checkpointing = True

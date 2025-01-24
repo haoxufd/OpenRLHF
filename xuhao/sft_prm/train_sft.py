@@ -98,7 +98,7 @@ def train(args):
     )
     # configure tokenizer
     tokenizer = get_tokenizer(args.pretrain, model.model, "right", strategy, use_fast=not args.disable_fast_tokenizer)
-    with open("xuhao/sft/data/input/chat_template.txt", 'r') as f:
+    with open("xuhao/sft_prm/data/input/chat_template.txt", 'r') as f:
         tokenizer.chat_template = f.read()
     tokenizer_eval_gen = get_tokenizer(args.pretrain, model.model, "left", strategy, use_fast=not args.disable_fast_tokenizer)
     tokenizer_eval_gen.chat_template = tokenizer.chat_template
@@ -227,7 +227,7 @@ if __name__ == "__main__":
     eval_acc_steps = 80
     pretrain = "/mnt/data/models/pretrain_models/Meta-Llama-3.1/Meta-Llama-3.1-8B"
     max_samples = 1e8
-    dataset = "xuhao/sft/data/input/sft_data_new"
+    dataset = "xuhao/sft_prm/data/input/sft_data_new"
     load_checkpoint = False
     max_epoches = 2
     input_key = "input"

@@ -160,8 +160,8 @@ def train(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
-    eval_steps = 25
-    eval_acc_steps = 25
+    eval_steps = -1
+    eval_acc_steps = -1
     pretrain = "/mnt/data/models/pretrain_models/Meta-Llama-3.1/Meta-Llama-3.1-8B"
     max_samples = 1e8
     dataset = "openai/gsm8k"

@@ -20,7 +20,6 @@ from xuhao.utils import read_json_list_file, write_json_list_file
 
 verification_system_message_file = "/root/OpenRLHF/xuhao/verify/data/input/verification_system_message.txt"
 verification_few_shot_file = "/root/OpenRLHF/xuhao/verify/data/input/verification_few_shot.json"
-chat_template_file = "/root/OpenRLHF/xuhao/sft_prm/data/input/chat_template.txt"
 
 def preprocess_data(data, input_key, apply_chat_template) -> dict:
     with open(verification_system_message_file, 'r') as f1, open(verification_few_shot_file, 'r') as f2:
@@ -95,8 +94,6 @@ def batch_generate(args):
 
     # configure tokenizer
     tokenizer = get_tokenizer(args.pretrain, model.model, "left", strategy, use_fast=not args.disable_fast_tokenizer)
-    # with open(chat_template_file, 'r') as f:
-    #     tokenizer.chat_template = f.read()
 
     # prepare models
     model = strategy.prepare(model)
@@ -163,7 +160,7 @@ def batch_generate(args):
                 eos_token_id=tokenizer.eos_token_id,
             )
             input_length = inputs["input_ids"].shape[1]
-            outputs = tokenizer.batch_decode(outputs[:, input_length:], skip_special_tokens=True)
+            outputs = tokenizer.batch_decode(outputs[:, input_length:], skip_special_tokens=False)
             for i, output in enumerate(outputs):
                 # 保存索引和输出的对应关系
                 indexed_outputs.append({
@@ -194,7 +191,7 @@ def batch_generate(args):
             json.dump(all_outputs[:len(prompts_data)], f, indent=4)
 
 if __name__ == "__main__":
-    pretrain = "/mnt/data/user/zhao_jun/xuhao/ckpt2"
+    pretrain = "/mnt/data/user/zhao_jun/xuhao/reward-llama-3.1-8b-sft-gsm8k"
     dataset = "xuhao/verify/data/input/verification_data_sft_test_new.json"
     input_key = "verification_input"
     max_samples = 1e8

@@ -10,6 +10,7 @@ import ray
 import torch
 import torch.nn as nn
 from tqdm import tqdm
+import json
 
 import re
 
@@ -120,6 +121,7 @@ class Samples:
     problem_list: list[str]
     previous_steps_list: list[str]
     step_list: list[str]
+    ref_solution_list: list[str]
 
 
 class NaiveExperienceMaker(ABC):
@@ -153,6 +155,8 @@ class NaiveExperienceMaker(ABC):
         self.reward_fn = reward_fn
         self.perf_stats = None
         self.advantage_estimator = strategy.args.advantage_estimator
+        self.verification_system_message_file = "xuhao/verify/data/input/verification_system_message.txt"
+        self.verification_few_shot_file = "xuhao/verify/data/input/verification_few_shot.json"
 
     # tokenizer
     def tokenize_fn(self, texts, max_length, padding=True, device=None):
@@ -175,7 +179,7 @@ class NaiveExperienceMaker(ABC):
         return {k: v.to(device) for k, v in batch.items()}
 
     @torch.no_grad()
-    def make_experience_list(self, all_prompts: Union[str, List[str]], **generate_kwargs) -> List[Experience]:
+    def make_experience_list(self, all_prompts: Union[str, List[str], List[List[str]]], **generate_kwargs) -> List[Experience]:
         """
         Make a list of experience with the micro_rollout_batch_size.
 
@@ -257,7 +261,8 @@ class NaiveExperienceMaker(ABC):
         sequence: torch.Tensor, 
         text: str,
         attention_mask: torch.Tensor, 
-        action_mask: torch.Tensor):
+        action_mask: torch.Tensor,
+        ref_solution: str):
         """
         由一个 sequence 得到 x 个 sub_sequence, 每个 sub_sequence 都有对应的 attention_mask, action_mask, problem, previous_steps 和 step_to_evaluate
         """
@@ -311,7 +316,7 @@ class NaiveExperienceMaker(ABC):
                 attention_msk = attention_mask
             
             result.append((
-                sub_sequence, attention_msk, action_msk, problem, previous_steps[:], step
+                sub_sequence, attention_msk, action_msk, problem, previous_steps[:], step, ref_solution
             ))
             previous_steps.append(step)
 
@@ -323,14 +328,14 @@ class NaiveExperienceMaker(ABC):
         assert all(x == lens[0] for x in lens)
         return result
 
-    def expand_sequences(self, sequences: torch.Tensor, texts: list, attention_mask: torch.Tensor, action_mask: torch.Tensor):
+    def expand_sequences(self, sequences: torch.Tensor, texts: list, attention_mask: torch.Tensor, action_mask: torch.Tensor, ref_solutions: list):
         """
         """
         n = sequences.size(0)
 
         result = []
         for i in range(n):
-            result.extend(self.expand_a_sequence(sequences[i], texts[i], attention_mask[i], action_mask[i]))
+            result.extend(self.expand_a_sequence(sequences[i], texts[i], attention_mask[i], action_mask[i], ref_solutions[i]))
         
         assert self.strategy is not None
         rank = self.strategy.get_rank()
@@ -340,11 +345,12 @@ class NaiveExperienceMaker(ABC):
         problem = [x[3] for x in result]
         previous_steps = [x[4] for x in result]
         step = [x[5] for x in result]
+        ref_solution = [x[6] for x in result]
 
-        return sequences, attention_mask, action_mask, problem, previous_steps, step
+        return sequences, attention_mask, action_mask, problem, previous_steps, step, ref_solution
 
     @torch.no_grad()
-    def generate_samples(self, all_prompts: List[str], **generate_kwargs) -> List[Samples]:
+    def generate_samples(self, all_prompts: List[List[str]], **generate_kwargs) -> List[Samples]:
         """
         Generate samples and return in batches.
         """
@@ -356,11 +362,18 @@ class NaiveExperienceMaker(ABC):
         samples_list = []
         for i in range(0, len(all_prompts), args.micro_rollout_batch_size):
             prompts = all_prompts[i : i + args.micro_rollout_batch_size]
-            inputs = self.tokenize_fn(prompts, self.prompt_max_len, device="cuda")
-            sequences, attention_mask, action_mask = self.actor.generate(**inputs, **generate_kwargs)
+            problem_prompts = prompts[0]
+            ref_solutions = prompts[1]
+            inputs = self.tokenize_fn(problem_prompts, self.prompt_max_len, device=torch.cuda.current_device())
+            sequences, attention_mask, action_mask = self.actor.generate(
+                **inputs,
+                early_stopping=False,
+                num_beams=2,
+                repetition_penalty=1.0,
+                **generate_kwargs)
             texts = self.tokenizer.batch_decode(sequences, skip_special_tokens=False)
-            new_sequences, new_attention_mask, new_action_mask, problem, previous_steps, step = self.expand_sequences(
-                sequences, texts, attention_mask, action_mask
+            new_sequences, new_attention_mask, new_action_mask, problem, previous_steps, step, ref_solution = self.expand_sequences(
+                sequences, texts, attention_mask, action_mask, ref_solutions
             )
             new_texts = self.tokenizer.batch_decode(new_sequences, skip_special_tokens=False)
             if new_sequences.size(0) > 0:
@@ -374,10 +387,32 @@ class NaiveExperienceMaker(ABC):
                     total_length=new_attention_mask.float().sum(dim=-1),
                     problem_list=problem,
                     previous_steps_list=previous_steps,
-                    step_list=step
+                    step_list=step,
+                    ref_solution_list=ref_solution
                 )
                 samples_list.append(samples)
         return samples_list
+    
+    def preprocess_data(self, problem, ref_solution, previous_steps, step) -> str:
+
+        # Add No. to previous_steps and step
+        previous_steps = [f"{idx+1}. " + step for idx, step in enumerate(previous_steps)]
+        previous_steps = '\n'.join(previous_steps)
+        step = f"{len(previous_steps) + 1}. " + step
+        data = f"Problem:\n{problem}\n\nReference Solution:\n{ref_solution}\n\nPrevious Steps:\n{previous_steps}\n\nStep to Evaluate:\n{step}"
+
+        with open(self.verification_system_message_file, 'r') as f1, open(self.verification_few_shot_file, 'r') as f2:
+            system_message = f1.read()
+            few_shot_examples = json.load(f2)
+
+        messages = [{"role": "system", "content": system_message}]
+        for example in few_shot_examples:
+            messages.append({"role": "user", "content": example["problem"]})
+            messages.append({"role": "assistant", "content": example["solution"]})
+        messages.append({"role": "user", "content": data})
+        prompt = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+
+        return prompt
 
     @torch.no_grad()
     def make_experience(self, samples: Samples) -> Experience:
@@ -396,6 +431,13 @@ class NaiveExperienceMaker(ABC):
         attention_mask = samples.attention_mask
         action_mask = samples.action_mask
         num_actions = samples.num_actions
+
+        problem_list = samples.problem_list
+        ref_solution_list = samples.ref_solution_list
+        previous_steps_list = samples.previous_steps_list
+        step_list = samples.step_list
+
+        prompts = [self.preprocess_data(a, b, c, d) for a, b, c, d in zip(problem_list, ref_solution_list, previous_steps_list, step_list)]
 
         # log probs
         action_log_probs = self.actor(sequences, num_actions, attention_mask)
@@ -416,8 +458,23 @@ class NaiveExperienceMaker(ABC):
             r = remote_rm_fn(self.remote_rm_url, queries=queries).to(device=action_log_probs.device)
         else:
             # local RM
-            r = self.reward_model(sequences, attention_mask)
-            # r = torch.cat((r, torch.tensor([1]).cuda(torch.cuda.current_device())))
+            inputs = self.tokenize_fn(prompts, 4096, device=torch.cuda.current_device())
+            outputs = self.reward_model.model.generate(
+                **inputs,
+                use_cache=True,
+                max_new_tokens=512,
+                do_sample=True,
+                top_p=1.0,
+                early_stopping=False,
+                num_beams=2,
+                temperature=1.0,
+                repetition_penalty=1.0,
+                pad_token_id=self.tokenizer.pad_token_id,
+                eos_token_id=self.tokenizer.eos_token_id,
+            )
+            input_length = inputs["input_ids"].shape[1]
+            outputs = self.tokenizer.batch_decode(outputs[:, input_length:], skip_special_tokens=True)
+            r = [0 if "Evaluation Result: INCORRECT" in output else 1 for output in outputs]
 
         kl = compute_approx_kl(
             action_log_probs,
