@@ -4,9 +4,11 @@ from copy import deepcopy
 from dataclasses import dataclass
 from tkinter import NO
 from typing import List, Optional, Tuple, Union
+from urllib import response
 
 from numpy import dtype
 import ray
+from sympy import sequence
 import torch
 import torch.nn as nn
 from tqdm import tqdm
@@ -255,17 +257,8 @@ class NaiveExperienceMaker(ABC):
             return False
         
         return True
-    
-    def expand_a_sequence(
-        self, 
-        sequence: torch.Tensor, 
-        text: str,
-        attention_mask: torch.Tensor, 
-        action_mask: torch.Tensor,
-        ref_solution: str):
-        """
-        由一个 sequence 得到 x 个 sub_sequence, 每个 sub_sequence 都有对应的 attention_mask, action_mask, problem, previous_steps 和 step_to_evaluate
-        """
+
+    def get_problem_and_solution_qwen(self, text: str):
         special_token_content = {
             "im_start": "<|im_start|>",
             "im_end": "<|im_end|>",
@@ -279,6 +272,36 @@ class NaiveExperienceMaker(ABC):
         sol_start_idx = tmp.find(sol_start_content) + len(sol_start_content)
         sol_end_idx = tmp.find(sol_end_content, sol_start_idx + len(sol_start_content))
         solution = tmp[sol_start_idx: sol_end_idx].strip()
+
+        return problem, solution
+
+    def get_problem_and_solution_llama(self, text: str):
+        header_start = "<|start_header_id|"
+        header_end = "<|end_header_id|"
+        text_start = "<|begin_of_text|>"
+        text_end = "<|end_of_text|>"
+        round_end = "<|eot_id|>"
+
+        user_split = header_start + "user" + header_end
+        assistant_split = header_start + "assistant" + header_end
+        tmp = text.split(user_split)[-1]
+        problem = tmp[:tmp.find(round_end)].strip()
+        tmp = text.split(assistant_split)[-1]
+        solution = tmp[:tmp.find(round_end)].strip()
+
+        return problem, solution
+    
+    def expand_a_sequence(
+        self, 
+        sequence: torch.Tensor, 
+        text: str,
+        attention_mask: torch.Tensor, 
+        action_mask: torch.Tensor,
+        ref_solution: str):
+        """
+        由一个 sequence 得到 x 个 sub_sequence, 每个 sub_sequence 都有对应的 attention_mask, action_mask, problem, previous_steps 和 step_to_evaluate
+        """
+        problem, solution = self.get_problem_and_solution_llama(text)
 
         # Check solution. If not valid, drop this sequence
         if not self.is_valid(solution):
@@ -326,6 +349,7 @@ class NaiveExperienceMaker(ABC):
         assert last_sub_seq == sequence_l
         lens = [len(x) for x in sub_sequences]
         assert all(x == lens[0] for x in lens)
+
         return result
 
     def expand_sequences(self, sequences: torch.Tensor, texts: list, attention_mask: torch.Tensor, action_mask: torch.Tensor, ref_solutions: list):
@@ -371,6 +395,21 @@ class NaiveExperienceMaker(ABC):
                 num_beams=2,
                 repetition_penalty=1.0,
                 **generate_kwargs)
+            prompt_len = inputs["input_ids"].size(1)
+            sequence_list = sequences.tolist()
+            response_sequence_list = [x[prompt_len:] for x in sequence_list]
+            attention_mask_list = attention_mask.tolist()
+            response_attention_mask_list = [x[prompt_len:] for x in attention_mask_list]
+            action_mask_list = action_mask.tolist()
+            assert len(action_mask_list[0]) == len(response_sequence_list[0])
+            assert len(action_mask_list[0]) == len(response_attention_mask_list[0])
+            for i in range(len(response_sequence_list)):
+                response_seq = response_sequence_list[i]
+                action_mask = action_mask_list[i]
+                response_attention_mask = response_attention_mask_list[i]
+                print(response_seq)
+                print(action_mask)
+                print(response_attention_mask)
             texts = self.tokenizer.batch_decode(sequences, skip_special_tokens=False)
             new_sequences, new_attention_mask, new_action_mask, problem, previous_steps, step, ref_solution = self.expand_sequences(
                 sequences, texts, attention_mask, action_mask, ref_solutions
