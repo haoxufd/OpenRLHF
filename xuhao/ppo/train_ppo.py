@@ -26,11 +26,11 @@ def train(args):
         args.pretrain,
         use_flash_attention_2=args.flash_attn,
         bf16=args.bf16,
-        # load_in_4bit=args.load_in_4bit,
-        # lora_rank=args.lora_rank,
-        # lora_alpha=args.lora_alpha,
-        # target_modules=args.target_modules,
-        # lora_dropout=args.lora_dropout,
+        load_in_4bit=args.load_in_4bit,
+        lora_rank=args.lora_rank,
+        lora_alpha=args.lora_alpha,
+        target_modules=args.target_modules,
+        lora_dropout=args.lora_dropout,
         ds_config=strategy.get_ds_train_config(is_actor=True),
     )
 
@@ -57,23 +57,11 @@ def train(args):
         critic = None
 
     if not args.remote_rm_url:
-        # reward_model = get_llm_for_sequence_regression(
-        #     args.reward_pretrain,
-        #     "reward",
-        #     normalize_reward=args.normalize_reward,
-        #     use_flash_attention_2=args.flash_attn,
-        #     bf16=args.bf16,
-        #     load_in_4bit=args.load_in_4bit,
-        #     ds_config=strategy.get_ds_train_config(is_actor=False),
-        #     value_head_prefix=args.value_head_prefix,
-        # )
         reward_model = Actor(
             args.reward_pretrain,
             use_flash_attention_2=args.flash_attn,
             bf16=args.bf16
         )
-        reward_model = strategy.prepare(reward_model)
-        reward_model.eval()
     else:
         reward_model = None
 
@@ -220,6 +208,8 @@ def train(args):
         is_rlhf=True,
     )
 
+    reward_model.eval()
+
     if ema_model:
         ema_model._offload = True
         ema_model = strategy.prepare(ema_model, is_rlhf=True)
@@ -255,8 +245,8 @@ def train(args):
         prompt_max_len=args.prompt_max_len,
         value_clip=args.value_clip,
         eps_clip=args.eps_clip,
-        # gamma=args.gamma,
-        # lambd=args.lambd,
+        gamma=args.gamma,
+        lambd=args.lambd,
         init_kl_coef=args.init_kl_coef,
         kl_target=args.kl_target,
         ema_beta=0.992,
@@ -298,6 +288,7 @@ if __name__ == "__main__":
     llama_reward = "/mnt/data/user/zhao_jun/xuhao/reward-llama-3.1-8b-sft-gsm8k"
     pretrain = llama_actor
     reward_pretrain = llama_reward
+    critic_pretrain = "/mnt/data/models/pretrain_models/Meta-Llama-3.1/Meta-Llama-3.1-8B-Instruct"
     prompt_data = "openai/gsm8k"
     micro_train_batch_size = 4
     train_batch_size = micro_train_batch_size * torch.cuda.device_count()
@@ -399,7 +390,7 @@ if __name__ == "__main__":
     parser.add_argument("--pretrain", type=str, default=pretrain, help="HF model name or path")
     parser.add_argument("--reward_pretrain", type=str, default=reward_pretrain, help="HF model name or path")
     parser.add_argument("--remote_rm_url", type=str, default=None, help="remote RM API")
-    parser.add_argument("--critic_pretrain", type=str, default=None, help="HF model name or path")
+    parser.add_argument("--critic_pretrain", type=str, default=critic_pretrain, help="HF model name or path")
     parser.add_argument("--value_head_prefix", type=str, default="score")
 
     # Custom dataset
