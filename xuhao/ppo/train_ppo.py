@@ -15,7 +15,9 @@ from xuhao.utils import blending_datasets
 from xuhao.ppo.prompts_dataset import PromptDataset
 
 
+
 def train(args):
+    os.environ['NCCL_TIMEOUT'] = '1200'
     # configure strategy
     strategy = get_strategy(args)
     strategy.setup_distributed()
@@ -118,17 +120,20 @@ def train(args):
         critic_optim = None
 
     # prepare datasets
-    prompts_data = blending_datasets(
+    prompts_data, eval_data = blending_datasets(
         args.prompt_data,
         args.prompt_data_probs,
         strategy,
         args.seed,
         max_count=args.max_samples,
-        return_eval=False,
+        return_eval=True,
         train_split=args.prompt_split,
     )
     prompts_data = prompts_data.select(range(min(args.max_samples, len(prompts_data))))
     prompts_dataset = PromptDataset(prompts_data, tokenizer, strategy, input_template=args.input_template)
+
+    eval_data = eval_data.select(range(min(args.max_samples, len(eval_data))))
+    eval_dataset = PromptDataset(eval_data, tokenizer, strategy)
 
     if args.pretrain_data:
         pretrain_data = blending_datasets(
@@ -168,6 +173,10 @@ def train(args):
         )
     else:
         pretrain_dataloader = None
+
+    eval_dataloader = strategy.setup_dataloader(
+        eval_dataset, args.micro_train_batch_size, True, False, drop_last=False
+    )
 
     # configure scheduler
     num_update_steps_per_episodes = (
@@ -264,7 +273,7 @@ def train(args):
         remote_rm_url=args.remote_rm_url,
     )
 
-    trainer.fit(args, prompts_dataloader, pretrain_dataloader, consumed_samples, num_update_steps_per_episodes)
+    trainer.fit(args, prompts_dataloader, pretrain_dataloader, eval_dataloader, consumed_samples, num_update_steps_per_episodes)
 
     # save model checkpoint after fitting on only rank0
     strategy.save_model(
@@ -292,8 +301,8 @@ if __name__ == "__main__":
     prompt_data = "openai/gsm8k"
     micro_train_batch_size = 4
     train_batch_size = micro_train_batch_size * torch.cuda.device_count()
-    micro_rollout_batch_size = 2
-    rollout_batch_size = micro_rollout_batch_size * torch.cuda.device_count() * 2
+    micro_rollout_batch_size = 4
+    rollout_batch_size = micro_rollout_batch_size * torch.cuda.device_count()
 
     gradient_checkpointing = True
     bf16 = True

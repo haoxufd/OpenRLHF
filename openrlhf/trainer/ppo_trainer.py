@@ -15,6 +15,9 @@ from openrlhf.utils.distributed_sampler import DistributedSampler
 
 from .ppo_utils import AdaptiveKLController, Experience, FixedKLController, NaiveExperienceMaker, NaiveReplayBuffer
 
+from torch import distributed as dist
+import json
+import jsonlines
 
 class PPOTrainer(ABC):
     """
@@ -185,6 +188,7 @@ class PPOTrainer(ABC):
         args,
         prompts_dataloader,
         pretrain_dataloader,
+        eval_dataloader,
         consumed_samples=0,
         num_update_steps_per_episodes=1,
     ) -> None:
@@ -204,6 +208,7 @@ class PPOTrainer(ABC):
 
         self.prompts_dataloader = prompts_dataloader
         self.pretrain_dataloader = pretrain_dataloader
+        self.eval_dataloader = eval_dataloader
 
         # Restore step and start_epoch
         steps = consumed_samples // args.rollout_batch_size + 1
@@ -230,7 +235,7 @@ class PPOTrainer(ABC):
                 for i, experience in enumerate(exp_list):
                     if i == 0:
                         output = self.tokenizer.batch_decode(
-                            experience.sequences[0].unsqueeze(0), skip_special_tokens=True
+                            experience.sequences[0].unsqueeze(0), skip_special_tokens=False
                         )
                         self.strategy.print(output)
                     self.replay_buffer.append(experience)
@@ -258,10 +263,12 @@ class PPOTrainer(ABC):
             self._tensorboard.close()
 
     def ppo_train(self, global_steps=0):
+        torch.distributed.barrier()
         # replay buffer may be empty at first, we should rebuild at each training
         dataloader = DataLoader(
             self.replay_buffer,
-            batch_size=self.replay_buffer.sample_batch_size,
+            # batch_size=self.replay_buffer.sample_batch_size,
+            batch_size = len(self.replay_buffer) // 2,
             shuffle=True,
             drop_last=True,
             pin_memory=self.dataloader_pin_memory,
@@ -280,7 +287,6 @@ class PPOTrainer(ABC):
             for experience in pbar:
                 experience.to_device(device)
                 status = self.training_step(experience, global_steps)
-
                 # for DP
                 # weighted mean for kl
                 if "kl" in status:
@@ -328,6 +334,56 @@ class PPOTrainer(ABC):
         if self.critic is not None:
             status.update(self.training_step_critic(experience))
         return status
+    
+    def process_in_batches(self, model, sequences, num_actions, attention_mask, packed_seq_lens, batch_size=4):
+        """
+        Process sequences in smaller batches to avoid CUDA OOM errors.
+        
+        Args:
+            sequences: Input tensor of shape (n * m)
+            num_actions: int
+            attention_mask: Input tensor of shape (n * m)
+            batch_size: Number of sequences to process at once
+            
+        Returns:
+            Concatenated results from all batches
+        """
+        # Get total number of sequences
+        total_sequences = sequences.size(0)
+        
+        # Calculate number of batches needed
+        num_batches = (total_sequences + batch_size - 1) // batch_size
+        
+        # List to store results from each batch
+        all_results = []
+        
+        for i in range(num_batches):
+            # Calculate start and end indices for current batch
+            start_idx = i * batch_size
+            end_idx = min((i + 1) * batch_size, total_sequences)
+            
+            # Get current batch of data
+            batch_sequences = sequences[start_idx:end_idx]
+            batch_attention_mask = attention_mask[start_idx:end_idx]
+            
+            # Process current batch
+            
+            batch_result = model(
+                batch_sequences,
+                num_actions,
+                batch_attention_mask,
+                packed_seq_lens=packed_seq_lens
+            )
+            
+            # Store batch result
+            all_results.append(batch_result)
+            
+            # Optional: Clear CUDA cache after each batch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        
+        # Concatenate all batch results
+        return torch.cat(all_results, dim=0)
 
     def training_step_actor(self, experience: Experience) -> Dict[str, float]:
         self.actor.train()
@@ -351,13 +407,7 @@ class PPOTrainer(ABC):
             attention_mask = experience.attention_mask
 
         # actor loss
-        action_log_probs, output = self.actor(
-            sequences,
-            num_actions,
-            attention_mask=attention_mask,
-            return_output=True,
-            packed_seq_lens=packed_seq_lens,
-        )
+        action_log_probs = self.process_in_batches(self.actor, sequences, num_actions, attention_mask, packed_seq_lens)
 
         # loss function
         actor_loss = self.actor_loss_fn(
@@ -367,10 +417,11 @@ class PPOTrainer(ABC):
             action_mask=experience.action_mask,
         )
         # mixtral
-        if self.aux_loss:
-            aux_loss = output.aux_loss
-        else:
-            aux_loss = 0
+        # if self.aux_loss:
+        #     # aux_loss = output.aux_loss
+        # else:
+        #     aux_loss = 0
+        aux_loss = 0
         loss = actor_loss + aux_loss * self.args.aux_loss_coef
         self.strategy.backward(loss, self.actor, self.actor_optim)
 
@@ -437,12 +488,12 @@ class PPOTrainer(ABC):
             attention_mask = experience.attention_mask
 
         # critic loss
-        values, output = self.critic(
+        values = self.process_in_batches(
+            self.critic,
             sequences,
             num_actions=num_actions,
             attention_mask=attention_mask,
-            return_output=True,
-            packed_seq_lens=packed_seq_lens,
+            packed_seq_lens=packed_seq_lens
         )
         # loss function
         critic_loss = self.critic_loss_fn(
@@ -452,10 +503,11 @@ class PPOTrainer(ABC):
             action_mask=experience.action_mask,
         )
         # mixtral
-        if self.aux_loss:
-            aux_loss = output.aux_loss
-        else:
-            aux_loss = 0
+        # if self.aux_loss:
+        #     aux_loss = output.aux_loss
+        # else:
+        #     aux_loss = 0
+        aux_loss = 0
         loss = critic_loss + aux_loss * self.args.aux_loss_coef
         self.strategy.backward(loss, self.critic, self.critic_optim)
         self.strategy.optimizer_step(self.critic_optim, self.critic, self.critic_scheduler, name="critic")
@@ -467,6 +519,107 @@ class PPOTrainer(ABC):
             "critic_lr": self.critic_scheduler.get_last_lr()[0],
         }
         return status
+    
+    def get_next_eval_gen_file(self, directory='xuhao/ppo/data/output'):
+            import re
+            # 获取目录下所有文件
+            files = os.listdir(directory)
+            
+            # 用正则表达式匹配 eval_step_数字.json 格式的文件
+            pattern = re.compile(r'eval_step_(\d+)\.json$')
+            
+            # 找出所有匹配的文件，提取编号
+            step_numbers = []
+            for file in files:
+                match = pattern.match(file)
+                if match:
+                    step_numbers.append(int(match.group(1)))
+            
+            # 如果没有找到匹配的文件，返回 0
+            if not step_numbers:
+                return "xuhao/ppo/data/output/eval_step_0.json"
+            
+            # 否则返回最大编号 + 1
+            return "xuhao/ppo/data/output/eval_step_{}.json".format(max(step_numbers)+1)
+    
+    def evaluate(self):
+        """
+        """
+        pbar = tqdm(
+        self.eval_dataloader,
+        desc="Generating",
+        disable=not self.strategy.is_rank_0(),
+        )
+        assert self.tokenizer is not None
+
+        def tokenize_fn(texts):
+            assert self.tokenizer is not None
+            batch = self.tokenizer(
+                texts,
+                return_tensors="pt",
+                add_special_tokens=False,
+                max_length=2048,
+                padding=True,
+                truncation=True,
+            )
+            return {k: v.to(torch.cuda.current_device()) for k, v in batch.items()}
+
+        dist.barrier()
+        indexed_outputs = []
+
+        for batch_idx, prompts in enumerate(pbar):
+            # 计算当前批次中样本的全局索引
+            start_idx = batch_idx * self.strategy.args.micro_train_batch_size * dist.get_world_size() + dist.get_rank()
+            batch_indices = [start_idx + i * dist.get_world_size() for i in range(len(prompts))]
+
+            inputs = tokenize_fn(prompts)
+            
+            outputs = self.actor.model.generate(
+                **inputs,
+                use_cache=True,
+                max_new_tokens=512,
+                do_sample=True,
+                top_p=1.0,
+                early_stopping=False,
+                num_beams=2,
+                temperature=1.0,
+                repetition_penalty=1.0,
+                pad_token_id=self.tokenizer.pad_token_id,
+                eos_token_id=self.tokenizer.eos_token_id,
+            )
+            input_length = inputs["input_ids"].shape[1]
+            outputs = self.tokenizer.batch_decode(outputs[:, input_length:], skip_special_tokens=False)
+            for i, output in enumerate(outputs):
+                # 保存索引和输出的对应关系
+                indexed_outputs.append((batch_indices[i], output))
+
+        # 将带索引的结果写入文件
+        with jsonlines.open(self.get_next_eval_gen_file() + str(self.strategy.get_rank()), mode="w") as writer:
+            writer.write_all(indexed_outputs)
+
+        dist.barrier()
+
+        # 在 rank 0 进程中合并并排序结果
+        if self.strategy.is_rank_0():
+            all_outputs = []
+            world_size = dist.get_world_size()
+            files = [self.get_next_eval_gen_file() + str(rank) for rank in range(world_size)]
+            
+            # 收集所有结果
+            for file in files:
+                with jsonlines.open(file, mode="r") as reader:
+                    for obj in reader:
+                        all_outputs.append(obj)
+                os.remove(file)
+            
+            # 按原始索引排序
+            all_outputs.sort(key=lambda x: x[0])
+            
+            # 只保存排序后的输出结果
+            sorted_outputs = [output for _, output in all_outputs]
+            
+            with open(self.get_next_eval_gen_file(), 'w') as f:
+                json.dump(sorted_outputs, f, indent=4)
 
     def save_logs_and_checkpoints(self, args, global_step, step_bar, logs_dict={}, client_states={}):
         if global_step % args.logging_steps == 0:
@@ -493,7 +646,7 @@ class PPOTrainer(ABC):
         # TODO: Add evaluation mechanism for PPO
         if global_step % args.eval_steps == 0:
             # self.evaluate(self.eval_dataloader, global_step)
-            pass
+            self.evaluate()
         # save ckpt
         # TODO: save best model on dev, use loss/perplexity/others on whole dev dataset as metric
         if global_step % args.save_steps == 0:

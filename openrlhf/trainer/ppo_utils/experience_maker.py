@@ -421,13 +421,13 @@ class NaiveExperienceMaker(ABC):
         args = self.strategy.args
         self.actor.eval()
         # sample multiple response
-        all_prompts = sum([[prompt] * args.n_samples_per_prompt for prompt in all_prompts], [])
+        all_problems = sum([[prompt] * args.n_samples_per_prompt for prompt in all_prompts[0]], [])
+        all_ref_solutions = sum([[ref_sol] * args.n_samples_per_prompt for ref_sol in all_prompts[1]], [])
         samples_list = []
-        for i in range(0, len(all_prompts), args.micro_rollout_batch_size):
-            prompts = all_prompts[i : i + args.micro_rollout_batch_size]
-            problem_prompts = prompts[0]
-            ref_solutions = prompts[1]
-            inputs = self.tokenize_fn(problem_prompts, self.prompt_max_len, device=torch.cuda.current_device())
+        for i in range(0, len(all_problems), args.micro_rollout_batch_size):
+            prompts = all_problems[i : i + args.micro_rollout_batch_size]
+            ref_solutions = all_ref_solutions[i : i + args.micro_rollout_batch_size]
+            inputs = self.tokenize_fn(prompts, self.prompt_max_len, device=torch.cuda.current_device())
             sequences, attention_mask, action_mask = self.actor.generate(
                 **inputs,
                 early_stopping=False,
@@ -455,6 +455,7 @@ class NaiveExperienceMaker(ABC):
                     final_value_list=final_value
                 )
                 samples_list.append(samples)
+
         return samples_list
     
     def preprocess_data(self, problem, ref_solution, previous_steps, step) -> str:
@@ -470,7 +471,7 @@ class NaiveExperienceMaker(ABC):
             few_shot_examples = json.load(f2)
 
         messages = [{"role": "system", "content": system_message}]
-        for example in few_shot_examples:
+        for example in few_shot_examples[:1]:
             messages.append({"role": "user", "content": example["input"]})
             messages.append({"role": "assistant", "content": example["output"]})
         messages.append({"role": "user", "content": data})
@@ -487,22 +488,30 @@ class NaiveExperienceMaker(ABC):
 
         prompts = [self.preprocess_data(a, b, c, d) for a, b, c, d in zip(problem_list, ref_solution_list, previous_steps_list, step_list)]
 
-        inputs = self.tokenize_fn(prompts, 4096, device=torch.cuda.current_device())
-        outputs = self.reward_model.model.generate(
-            **inputs,
-            use_cache=True,
-            max_new_tokens=512,
-            do_sample=True,
-            top_p=1.0,
-            early_stopping=False,
-            num_beams=2,
-            temperature=1.0,
-            repetition_penalty=1.0,
-            pad_token_id=self.tokenizer.pad_token_id,
-            eos_token_id=self.tokenizer.eos_token_id,
-        )
-        input_length = inputs["input_ids"].shape[1]
-        outputs = self.tokenizer.batch_decode(outputs[:, input_length:], skip_special_tokens=True)
+        micro_prompt_lists = []
+        for i in range(0, len(prompts), 4):
+            micro_prompt_lists.append(prompts[i:i + 4])
+        
+        outputs = []
+        for micro_promts in micro_prompt_lists:
+            micro_inputs = self.tokenize_fn(micro_promts, 4096, device=torch.cuda.current_device())
+            micro_outputs = self.reward_model.model.generate(
+                **micro_inputs,
+                use_cache=True,
+                max_new_tokens=512,
+                do_sample=True,
+                top_p=1.0,
+                early_stopping=False,
+                num_beams=2,
+                temperature=1.0,
+                repetition_penalty=1.0,
+                pad_token_id=self.tokenizer.pad_token_id,
+                eos_token_id=self.tokenizer.eos_token_id,
+            )
+            input_length = micro_inputs["input_ids"].shape[1]
+            micro_outputs = self.tokenizer.batch_decode(micro_outputs[:, input_length:], skip_special_tokens=True)
+            outputs.extend(micro_outputs)
+
         r = [False if "Evaluation Result: INCORRECT" in output else True for output in outputs]
 
         # count the number of steps for each problem
@@ -530,11 +539,61 @@ class NaiveExperienceMaker(ABC):
                 if r[i] == False:
                     break
         
-        r = [r[x] for x in selected_items]
-        
+        r = [float(r[x]) for x in selected_items]
+        r = torch.tensor(r, dtype=torch.float64).to(device=torch.cuda.current_device())
+
         return r, samples.subset(selected_items)
         
+    import torch
 
+    def process_in_batches(self, model, sequences, num_actions, attention_mask, batch_size=4):
+        """
+        Process sequences in smaller batches to avoid CUDA OOM errors.
+        
+        Args:
+            sequences: Input tensor of shape (n * m)
+            num_actions: int
+            attention_mask: Input tensor of shape (n * m)
+            batch_size: Number of sequences to process at once
+            
+        Returns:
+            Concatenated results from all batches
+        """
+        # Get total number of sequences
+        total_sequences = sequences.size(0)
+        
+        # Calculate number of batches needed
+        num_batches = (total_sequences + batch_size - 1) // batch_size
+        
+        # List to store results from each batch
+        all_results = []
+        
+        for i in range(num_batches):
+            # Calculate start and end indices for current batch
+            start_idx = i * batch_size
+            end_idx = min((i + 1) * batch_size, total_sequences)
+            
+            # Get current batch of data
+            batch_sequences = sequences[start_idx:end_idx]
+            batch_attention_mask = attention_mask[start_idx:end_idx]
+            
+            # Process current batch
+            
+            batch_result = model(
+                batch_sequences,
+                num_actions,
+                batch_attention_mask
+            )
+            
+            # Store batch result
+            all_results.append(batch_result)
+            
+            # Optional: Clear CUDA cache after each batch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        
+        # Concatenate all batch results
+        return torch.cat(all_results, dim=0)
 
     @torch.no_grad()
     def make_experience(self, samples: Samples) -> Experience:
@@ -557,14 +616,14 @@ class NaiveExperienceMaker(ABC):
         num_actions = samples.num_actions
 
         # log probs
-        action_log_probs = self.actor(sequences, num_actions, attention_mask)
+        action_log_probs = self.process_in_batches(self.actor, sequences, num_actions, attention_mask)
 
         # init log probs
-        base_action_log_probs = self.initial_model(sequences, num_actions, attention_mask)
+        base_action_log_probs = self.process_in_batches(self.initial_model, sequences, num_actions, attention_mask)
 
         # values
         if self.critic is not None:
-            value = self.critic(sequences, num_actions, attention_mask)
+            value = self.process_in_batches(self.critic, sequences, num_actions, attention_mask)
         else:
             value = None
 
