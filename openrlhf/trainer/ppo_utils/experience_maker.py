@@ -471,9 +471,9 @@ class NaiveExperienceMaker(ABC):
             few_shot_examples = json.load(f2)
 
         messages = [{"role": "system", "content": system_message}]
-        for example in few_shot_examples[:1]:
-            messages.append({"role": "user", "content": example["input"]})
-            messages.append({"role": "assistant", "content": example["output"]})
+        # for example in few_shot_examples[:1]:
+        #     messages.append({"role": "user", "content": example["input"]})
+        #     messages.append({"role": "assistant", "content": example["output"]})
         messages.append({"role": "user", "content": data})
         prompt = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
 

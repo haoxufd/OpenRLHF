@@ -4,6 +4,7 @@ import math
 import os
 from datetime import datetime
 
+from numpy import save
 import torch
 from transformers.trainer import get_scheduler
 
@@ -13,6 +14,7 @@ from openrlhf.trainer import PPOTrainer
 from openrlhf.utils import get_strategy, get_tokenizer
 from xuhao.utils import blending_datasets
 from xuhao.ppo.prompts_dataset import PromptDataset
+from xuhao.ppo.prompts_dataset_eval import PromptDatasetEval
 
 
 
@@ -133,7 +135,7 @@ def train(args):
     prompts_dataset = PromptDataset(prompts_data, tokenizer, strategy, input_template=args.input_template)
 
     eval_data = eval_data.select(range(min(args.max_samples, len(eval_data))))
-    eval_dataset = PromptDataset(eval_data, tokenizer, strategy)
+    eval_dataset = PromptDatasetEval(eval_data, tokenizer, strategy)
 
     if args.pretrain_data:
         pretrain_data = blending_datasets(
@@ -175,7 +177,7 @@ def train(args):
         pretrain_dataloader = None
 
     eval_dataloader = strategy.setup_dataloader(
-        eval_dataset, args.micro_train_batch_size, True, False, drop_last=False
+        eval_dataset, 4, True, False, drop_last=False
     )
 
     # configure scheduler
@@ -291,7 +293,7 @@ def train(args):
 
 
 if __name__ == "__main__":
-    save_value_network = False
+    save_value_network = True
     qwen = "/mnt/data/models/pretrain_models/Qwen2.5-1.5B-Instruct"
     llama_actor = "/mnt/data/user/zhao_jun/xuhao/actor-llama-3.1-8b-sft-gsm8k"
     llama_reward = "/mnt/data/user/zhao_jun/xuhao/reward-llama-3.1-8b-sft-gsm8k"
@@ -299,10 +301,13 @@ if __name__ == "__main__":
     reward_pretrain = llama_reward
     critic_pretrain = "/mnt/data/models/pretrain_models/Meta-Llama-3.1/Meta-Llama-3.1-8B-Instruct"
     prompt_data = "openai/gsm8k"
-    micro_train_batch_size = 4
+    micro_train_batch_size = 2
     train_batch_size = micro_train_batch_size * torch.cuda.device_count()
     micro_rollout_batch_size = 4
     rollout_batch_size = micro_rollout_batch_size * torch.cuda.device_count()
+
+    eval_steps = 50
+    save_steps = 50
 
     gradient_checkpointing = True
     bf16 = True
@@ -311,19 +316,19 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     # Checkpoint
     parser.add_argument("--save_path", type=str, default="./ckpt")
-    parser.add_argument("--save_steps", type=int, default=-1)
+    parser.add_argument("--save_steps", type=int, default=save_steps)
     parser.add_argument("--logging_steps", type=int, default=1)
-    parser.add_argument("--eval_steps", type=int, default=-1)
+    parser.add_argument("--eval_steps", type=int, default=eval_steps)
     parser.add_argument("--ckpt_path", type=str, default="./ckpt/checkpoints_ppo")
     parser.add_argument("--max_ckpt_num", type=int, default=3)
     parser.add_argument("--max_ckpt_mem", type=int, default=1e8)
     parser.add_argument("--load_checkpoint", action="store_true", default=False)
 
     # PPO
-    parser.add_argument("--num_episodes", type=int, default=1)
+    parser.add_argument("--num_episodes", type=int, default=2)
     parser.add_argument("--rollout_batch_size", type=int, default=rollout_batch_size)
     parser.add_argument("--micro_rollout_batch_size", type=int, default=micro_rollout_batch_size)
-    parser.add_argument("--max_epochs", type=int, default=1)
+    parser.add_argument("--max_epochs", type=int, default=2)
     parser.add_argument("--prompt_max_len", type=int, default=1024, help="Max tokens for each prompt")
     parser.add_argument("--generate_max_len", type=int, default=generate_max_len, help="Max tokens to generate in PPO")
     parser.add_argument("--max_len", type=int, default=None, help="deprecated max_len")
@@ -426,7 +431,7 @@ if __name__ == "__main__":
     )
 
     # wandb parameters
-    parser.add_argument("--use_wandb", type=str, default=None)
+    parser.add_argument("--use_wandb", type=str, default=True)
     parser.add_argument("--wandb_org", type=str, default=None)
     parser.add_argument("--wandb_group", type=str, default=None)
     parser.add_argument("--wandb_project", type=str, default="openrlhf_train_ppo")

@@ -268,7 +268,7 @@ class PPOTrainer(ABC):
         dataloader = DataLoader(
             self.replay_buffer,
             # batch_size=self.replay_buffer.sample_batch_size,
-            batch_size = len(self.replay_buffer) // 2,
+            batch_size = self.replay_buffer.sample_batch_size,
             shuffle=True,
             drop_last=True,
             pin_memory=self.dataloader_pin_memory,
@@ -318,6 +318,7 @@ class PPOTrainer(ABC):
                 status_list.append(status)
                 pbar.set_postfix(short_status)
 
+        torch.distributed.barrier()
         if status_list:
             status_mean = status_list[0]
             for m in status_list[1:]:
@@ -325,6 +326,7 @@ class PPOTrainer(ABC):
                     status_mean[k] += v
             for k in status_mean.keys():
                 status_mean[k] /= len(status_list)
+        torch.distributed.barrier()
         return status_mean
 
     def training_step(self, experience: Experience, global_steps) -> Dict[str, float]:
@@ -547,7 +549,7 @@ class PPOTrainer(ABC):
         """
         pbar = tqdm(
         self.eval_dataloader,
-        desc="Generating",
+        desc="Evaluating",
         disable=not self.strategy.is_rank_0(),
         )
         assert self.tokenizer is not None
@@ -573,10 +575,9 @@ class PPOTrainer(ABC):
             batch_indices = [start_idx + i * dist.get_world_size() for i in range(len(prompts))]
 
             inputs = tokenize_fn(prompts)
-            
             outputs = self.actor.model.generate(
                 **inputs,
-                use_cache=True,
+                use_cache=False,
                 max_new_tokens=512,
                 do_sample=True,
                 top_p=1.0,
