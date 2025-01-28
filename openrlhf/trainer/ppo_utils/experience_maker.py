@@ -231,7 +231,9 @@ class NaiveExperienceMaker(ABC):
             desc="make_experience",
             disable=not self.strategy.is_rank_0(),
         ):
-            experiences.append(self.make_experience(samples).to_device("cpu"))
+            experience = self.make_experience(samples)
+            if experience is not None:
+                experiences.append(experience.to_device("cpu"))
 
         experiences, rewards = self.process_experiences(experiences)
 
@@ -489,8 +491,8 @@ class NaiveExperienceMaker(ABC):
         prompts = [self.preprocess_data(a, b, c, d) for a, b, c, d in zip(problem_list, ref_solution_list, previous_steps_list, step_list)]
 
         micro_prompt_lists = []
-        for i in range(0, len(prompts), 4):
-            micro_prompt_lists.append(prompts[i:i + 4])
+        for i in range(0, len(prompts), 2):
+            micro_prompt_lists.append(prompts[i:i + 2])
         
         outputs = []
         for micro_promts in micro_prompt_lists:
@@ -596,7 +598,7 @@ class NaiveExperienceMaker(ABC):
         return torch.cat(all_results, dim=0)
 
     @torch.no_grad()
-    def make_experience(self, samples: Samples) -> Experience:
+    def make_experience(self, samples: Samples) -> Experience|None:
         """
         Turn samples into experience by calculating logprobs, values, rewards, and kl divergence.
         """
@@ -608,6 +610,9 @@ class NaiveExperienceMaker(ABC):
             self.critic.eval()
 
         r, samples = self.postprocess_samples(samples)
+
+        if r.size(0) == 0:
+            return None
 
         # extract values from samples
         sequences = samples.sequences

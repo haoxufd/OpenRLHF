@@ -301,9 +301,9 @@ if __name__ == "__main__":
     reward_pretrain = llama_reward
     critic_pretrain = "/mnt/data/models/pretrain_models/Meta-Llama-3.1/Meta-Llama-3.1-8B-Instruct"
     prompt_data = "openai/gsm8k"
-    micro_train_batch_size = 2
+    micro_train_batch_size = 1
     train_batch_size = micro_train_batch_size * torch.cuda.device_count()
-    micro_rollout_batch_size = 4
+    micro_rollout_batch_size = 1
     rollout_batch_size = micro_rollout_batch_size * torch.cuda.device_count()
 
     eval_steps = 50
@@ -328,7 +328,7 @@ if __name__ == "__main__":
     parser.add_argument("--num_episodes", type=int, default=2)
     parser.add_argument("--rollout_batch_size", type=int, default=rollout_batch_size)
     parser.add_argument("--micro_rollout_batch_size", type=int, default=micro_rollout_batch_size)
-    parser.add_argument("--max_epochs", type=int, default=2)
+    parser.add_argument("--max_epochs", type=int, default=1)
     parser.add_argument("--prompt_max_len", type=int, default=1024, help="Max tokens for each prompt")
     parser.add_argument("--generate_max_len", type=int, default=generate_max_len, help="Max tokens to generate in PPO")
     parser.add_argument("--max_len", type=int, default=None, help="deprecated max_len")

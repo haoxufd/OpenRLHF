@@ -227,8 +227,11 @@ class PPOTrainer(ABC):
             )
 
             for rand_prompts in self.prompts_dataloader:
+                torch.distributed.barrier()
                 exp_list = self.experience_maker.make_experience_list(rand_prompts, **self.generate_kwargs)
                 if not exp_list:
+                    client_states = {"consumed_samples": steps * args.rollout_batch_size}
+                    self.save_logs_and_checkpoints(args, steps, pbar, client_states=client_states)
                     pbar.update()
                     steps = steps + 1
                     continue
@@ -274,8 +277,8 @@ class PPOTrainer(ABC):
             pin_memory=self.dataloader_pin_memory,
             collate_fn=self.replay_buffer.collate_fn,
         )
-        device = torch.cuda.current_device()
 
+        device = torch.cuda.current_device()
         status_list = []
         status_mean = {}
         for epoch in range(self.max_epochs):
