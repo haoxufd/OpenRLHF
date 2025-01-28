@@ -301,10 +301,10 @@ if __name__ == "__main__":
     reward_pretrain = llama_reward
     critic_pretrain = "/mnt/data/models/pretrain_models/Meta-Llama-3.1/Meta-Llama-3.1-8B-Instruct"
     prompt_data = "openai/gsm8k"
-    micro_train_batch_size = 1
+    micro_train_batch_size = 4
     train_batch_size = micro_train_batch_size * torch.cuda.device_count()
-    micro_rollout_batch_size = 1
-    rollout_batch_size = micro_rollout_batch_size * torch.cuda.device_count()
+    micro_rollout_batch_size = 4
+    rollout_batch_size = micro_rollout_batch_size * torch.cuda.device_count() * 2
 
     eval_steps = 50
     save_steps = 50
