@@ -306,12 +306,16 @@ if __name__ == "__main__":
     micro_rollout_batch_size = 4
     rollout_batch_size = micro_rollout_batch_size * torch.cuda.device_count() * 2
 
-    eval_steps = 50
-    save_steps = 50
+    eval_steps = 20
+    save_steps = 20
 
     gradient_checkpointing = True
     bf16 = True
     generate_max_len = 512
+
+    load_checkpoint = True
+    save_path = "/mnt/data/user/zhao_jun/xuhao/ckpt-ppo-1"
+    ckpt_path = "/mnt/data/user/zhao_jun/xuhao/ckpt-ppo-1/checkpoints_ppo"
 
     parser = argparse.ArgumentParser()
     # Checkpoint
@@ -322,10 +326,10 @@ if __name__ == "__main__":
     parser.add_argument("--ckpt_path", type=str, default="./ckpt/checkpoints_ppo")
     parser.add_argument("--max_ckpt_num", type=int, default=3)
     parser.add_argument("--max_ckpt_mem", type=int, default=1e8)
-    parser.add_argument("--load_checkpoint", action="store_true", default=False)
+    parser.add_argument("--load_checkpoint", action="store_true", default=load_checkpoint)
 
     # PPO
-    parser.add_argument("--num_episodes", type=int, default=2)
+    parser.add_argument("--num_episodes", type=int, default=3)
     parser.add_argument("--rollout_batch_size", type=int, default=rollout_batch_size)
     parser.add_argument("--micro_rollout_batch_size", type=int, default=micro_rollout_batch_size)
     parser.add_argument("--max_epochs", type=int, default=1)

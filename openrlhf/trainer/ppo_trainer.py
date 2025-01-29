@@ -229,12 +229,7 @@ class PPOTrainer(ABC):
             for rand_prompts in self.prompts_dataloader:
                 torch.distributed.barrier()
                 exp_list = self.experience_maker.make_experience_list(rand_prompts, **self.generate_kwargs)
-                # if not exp_list:
-                #     client_states = {"consumed_samples": steps * args.rollout_batch_size}
-                #     self.save_logs_and_checkpoints(args, steps, pbar, client_states=client_states)
-                #     pbar.update()
-                #     steps = steps + 1
-                #     continue
+                
                 for i, experience in enumerate(exp_list):
                     if i == 0:
                         output = self.tokenizer.batch_decode(
@@ -243,17 +238,33 @@ class PPOTrainer(ABC):
                         self.strategy.print(output)
                     self.replay_buffer.append(experience)
 
+                # 1. 首先同步所有进程的数据量
+                local_size = len(self.replay_buffer)
+                size_tensor = torch.LongTensor([local_size]).cuda()
+                torch.distributed.all_reduce(size_tensor, op=torch.distributed.ReduceOp.MIN)
+                min_size = int(size_tensor.item())
+            
+                # 2. 所有进程都使用相同的最小数据量
+                if local_size > min_size:
+                    self.replay_buffer.items = self.replay_buffer.items[:min_size]
+                
+                if len(self.replay_buffer) == 0:
+                    client_states = {"consumed_samples": steps * args.rollout_batch_size}
+                    self.save_logs_and_checkpoints(args, steps, pbar, client_states=client_states)
+                    pbar.update()
+                    steps = steps + 1
+                    continue
+
                 torch.cuda.empty_cache()
-                if len(self.replay_buffer) > 0:
-                    self.replay_buffer.normalize("advantages", self.strategy)
+                self.replay_buffer.normalize("advantages", self.strategy)
                 status = self.ppo_train(steps)
                 self.replay_buffer.clear()
                 torch.cuda.empty_cache()
 
                 if "kl" in status:
                     self.kl_ctl.update(status["kl"], args.rollout_batch_size * args.n_samples_per_prompt)
+            
                 pbar.set_postfix(status)
-
                 # logs/checkpoints
                 client_states = {"consumed_samples": steps * args.rollout_batch_size}
                 self.save_logs_and_checkpoints(args, steps, pbar, status, client_states)
@@ -268,16 +279,6 @@ class PPOTrainer(ABC):
 
     def ppo_train(self, global_steps=0):
         torch.distributed.barrier()
-
-        # 1. 首先同步所有进程的数据量
-        local_size = len(self.replay_buffer)
-        size_tensor = torch.LongTensor([local_size]).cuda()
-        torch.distributed.all_reduce(size_tensor, op=torch.distributed.ReduceOp.MIN)
-        min_size = int(size_tensor.item())
-    
-        # 2. 所有进程都使用相同的最小数据量
-        if local_size > min_size:
-            self.replay_buffer.items = self.replay_buffer.items[:min_size]
 
         # replay buffer may be empty at first, we should rebuild at each training
         dataloader = DataLoader(
