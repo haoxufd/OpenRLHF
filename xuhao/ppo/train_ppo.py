@@ -319,11 +319,11 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     # Checkpoint
-    parser.add_argument("--save_path", type=str, default="./ckpt")
+    parser.add_argument("--save_path", type=str, default=save_path)
     parser.add_argument("--save_steps", type=int, default=save_steps)
     parser.add_argument("--logging_steps", type=int, default=1)
     parser.add_argument("--eval_steps", type=int, default=eval_steps)
-    parser.add_argument("--ckpt_path", type=str, default="./ckpt/checkpoints_ppo")
+    parser.add_argument("--ckpt_path", type=str, default=ckpt_path)
     parser.add_argument("--max_ckpt_num", type=int, default=3)
     parser.add_argument("--max_ckpt_mem", type=int, default=1e8)
     parser.add_argument("--load_checkpoint", action="store_true", default=load_checkpoint)
