@@ -177,7 +177,7 @@ def train(args):
         pretrain_dataloader = None
 
     eval_dataloader = strategy.setup_dataloader(
-        eval_dataset, 4, True, False, drop_last=False
+        eval_dataset, args.micro_train_batch_size, True, False, drop_last=False
     )
 
     # configure scheduler
@@ -301,13 +301,13 @@ if __name__ == "__main__":
     reward_pretrain = llama_reward
     critic_pretrain = "/mnt/data/models/pretrain_models/Meta-Llama-3.1/Meta-Llama-3.1-8B-Instruct"
     prompt_data = "openai/gsm8k"
-    micro_train_batch_size = 4
+    micro_train_batch_size = 2
     train_batch_size = micro_train_batch_size * torch.cuda.device_count()
-    micro_rollout_batch_size = 4
+    micro_rollout_batch_size = 2
     rollout_batch_size = micro_rollout_batch_size * torch.cuda.device_count() * 2
 
-    eval_steps = 20
-    save_steps = 20
+    eval_steps = 60
+    save_steps = 60
 
     gradient_checkpointing = True
     bf16 = True

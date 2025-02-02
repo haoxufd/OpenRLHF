@@ -338,6 +338,8 @@ class NaiveExperienceMaker(ABC):
 
         # Check solution. If not valid, drop this sequence
         if not self.is_valid(solution):
+            if self.strategy.is_rank_0():
+                print("Drop Solution: ", solution)
             return []
 
         # Divide solution into steps
@@ -516,6 +518,16 @@ class NaiveExperienceMaker(ABC):
 
         r = [False if "Evaluation Result: INCORRECT" in output else True for output in outputs]
 
+        if self.strategy.is_rank_0():
+            for i in range(len(problem_list)):
+                print("#### ", i)
+                print("Problem: ", problem_list[i])
+                print("Ref Solv: ", ref_solution_list[i])
+                print("Previous Steps: ", previous_steps_list[i])
+                print("Step to Eval: ", step_list[i])
+                print("Final Value: ", final_value_list[i])
+                print("Eval: ", outputs[i])
+
         # count the number of steps for each problem
         count_dict = {}
         for problem in problem_list:
@@ -541,7 +553,9 @@ class NaiveExperienceMaker(ABC):
                 if r[i] == False:
                     break
         
-        r = [float(r[x]) for x in selected_items]
+        print("Selected Items: ", selected_items)
+
+        r = [1.0 if r[x] else -1.0 for x in selected_items]
         r = torch.tensor(r, dtype=torch.float64).to(device=torch.cuda.current_device())
 
         return r, samples.subset(selected_items)
