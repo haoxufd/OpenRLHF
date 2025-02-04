@@ -295,8 +295,8 @@ if __name__ == "__main__":
 
     # PPO
     parser.add_argument("--num_episodes", type=int, default=1)
-    parser.add_argument("--rollout_batch_size", type=int, default=512)
-    parser.add_argument("--micro_rollout_batch_size", type=int, default=8)
+    parser.add_argument("--rollout_batch_size", type=int, default=2)
+    parser.add_argument("--micro_rollout_batch_size", type=int, default=1)
     parser.add_argument("--max_epochs", type=int, default=1)
     parser.add_argument("--prompt_max_len", type=int, default=1024, help="Max tokens for each prompt")
     parser.add_argument("--generate_max_len", type=int, default=1024, help="Max tokens to generate in PPO")
@@ -370,10 +370,10 @@ if __name__ == "__main__":
     parser.add_argument("--lora_dropout", type=float, default=0)
 
     # Models
-    parser.add_argument("--pretrain", type=str, default=None, help="HF model name or path")
-    parser.add_argument("--reward_pretrain", type=str, default=None, help="HF model name or path")
+    parser.add_argument("--pretrain", type=str, default="/mnt/data/user/zhao_jun/xuhao/actor-llama-3.1-8b-sft-gsm8k", help="HF model name or path")
+    parser.add_argument("--reward_pretrain", type=str, default="/mnt/data/models/pretrain_models/Meta-Llama-3.1/Meta-Llama-3.1-8B-Instruct", help="HF model name or path")
     parser.add_argument("--remote_rm_url", type=str, default=None, help="remote RM API")
-    parser.add_argument("--critic_pretrain", type=str, default=None, help="HF model name or path")
+    parser.add_argument("--critic_pretrain", type=str, default="/mnt/data/models/pretrain_models/Meta-Llama-3.1/Meta-Llama-3.1-8B-Instruct", help="HF model name or path")
     parser.add_argument("--value_head_prefix", type=str, default="score")
 
     # Custom dataset
