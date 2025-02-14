@@ -119,26 +119,30 @@ def blending_datasets(
     else:
         return train_dataset
 
-def get_solve_result(solution: list, ref_solution: list):
+def parse_solution(solution: str):
+    value = re.findall(r'#### ([+-]?[\d,]*\.?[\d,]+)', solution)
+    value = value[0].replace(',', '') if len(value) > 0 else None
+    return float(value) if value is not None else None
+
+def get_solve_result(solutions: list, ref_solutions: list):
     """
     由于是通过 batch inference 得到的 solution, 其中的数据可能多于 ref_solution
     但两者数据是按顺序对应的, 遍历的时候以 ref_solution 为主即可
     """
     num_correct = num_incorrect = 0
-    for i in range(len(ref_solution)):
-        answer = solution[i]
-        ref_answer = ref_solution[i]
-        
-        value = re.findall(r'#### ([+-]?[\d,]*\.?[\d,]+)', answer)
-        value = value[0].replace(',', '') if len(value) > 0 else None
-        ref_value = re.findall(r'#### ([+-]?[\d,]*\.?[\d,]+)', ref_answer)
-        assert len(ref_value) > 0
-        ref_value = ref_value[0].replace(',', '')
+    incorrect_indices = []
+    for i in range(len(ref_solutions)):
+        value = parse_solution(solutions[i])
+        ref_value = parse_solution(ref_solutions[i])
 
         if value is None:
             num_incorrect += 1
-        elif value is not None and float(value) != float(ref_value):
+            incorrect_indices.append(i)
+        elif value is not None and value != ref_value:
             num_incorrect += 1
+            incorrect_indices.append(i)
         else:
             num_correct += 1
-    return [num_correct, num_incorrect]
+    total = num_correct + num_incorrect
+    acc = num_correct / total
+    return [num_correct, num_incorrect, total, acc, incorrect_indices]
