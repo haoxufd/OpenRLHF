@@ -160,20 +160,20 @@ def train(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
-    eval_steps = -1
-    eval_acc_steps = -1
-    pretrain = "/mnt/data/models/pretrain_models/Meta-Llama-3.1/Meta-Llama-3.1-8B"
+    eval_steps = 10
+    eval_acc_steps = 100000000
+    pretrain = "/root/data/models/Meta-Llama-3.1-8B"
     max_samples = 1e8
     dataset = "openai/gsm8k"
     load_checkpoint = False
     max_epoches = 2
     input_key = "question"
     output_key = "answer"
-    save_path = "/mnt/data/user/zhao_jun/xuhao/ckpt-am-1"
-    ckpt_path = "/mnt/data/user/zhao_jun/xuhao/ckpt-am-1/checkpoints_sft"
+    save_path = "/root/data/sft_am/ckpt_1"
+    ckpt_path = "/root/data/sft_am/ckpt_1/checkpoints_sft"
 
     micro_train_batch_size = 8
-    train_batch_size = 32
+    train_batch_size = 64
 
 
     # Checkpoint

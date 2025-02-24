@@ -7,14 +7,14 @@ from torch.utils.data import Dataset
 from openrlhf.datasets.utils import zero_pad_sequences
 
 
-def preprocess_data(data, input_template=None, input_key="problem", output_key="solution", apply_chat_template=None):
+def preprocess_data(data, input_template=None, input_key="question", output_key="answer", apply_chat_template=None):
     with open("xuhao/sft_am/data/input/system_message.txt", 'r') as f:
         system_message = f.read()
 
     assert apply_chat_template is not None
 
     prompt_message = data[input_key]
-    response_message = data[output_key]
+    response_message = data[output_key].replace("\n", "<|reserved_special_token_0|>")
     assert isinstance(prompt_message, str) and isinstance(response_message, str)
     
     system_message = [{"role": "system", "content": system_message}]

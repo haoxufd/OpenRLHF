@@ -192,16 +192,16 @@ def batch_generate(args):
             json.dump(sorted_outputs, f, indent=4)
 
 def main():
-    pretrain = "/mnt/data/user/zhao_jun/xuhao/actor-llama-3.1-8b-sft-gsm8k"
+    pretrain = "/root/data/sft_am/ckpt_1"
     dataset = "openai/gsm8k"
     input_key = "question"
     max_samples = 1e8
-    output_path = f"{home_dir}/OpenRLHF/xuhao/solve/data/output/solution_llama-instruct_gsm8k-train.json"
+    output_path = "xuhao/solve/data/output/solution_llama-instruct-special-token_gsm8k-test.json"
     prompt_max_length = 4096
     max_new_tokens = 1024
     micro_batch_size = 8
-    train_batch_size = 32
-    dataset_split = "train"
+    train_batch_size = 64
+    dataset_split = "test"
 
     torch.cuda.empty_cache()
     parser = argparse.ArgumentParser()

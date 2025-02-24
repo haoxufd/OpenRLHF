@@ -1,10 +1,10 @@
 [
     {
         "problem": "There are some oranges in a basket. Ana spends 3 minutes peeling an orange and Jane spends 4 minutes doing the same. If Ana and Jane start picking oranges from this basket to peel at the same time, how many more oranges will Ana have peeled than Jane after an hour?",
-        "solution": "There are 60 minutes in an hour. Ana peels an orange in 3 minutes so she will peel 60/3 = <<60/3=20>>20 oranges in an hour\nJane peels an orange in 4 minutes so she will peel 60/4 = <<60/4=15>>15 oranges in an hour\nAna will have peeled 20-15 = <<20-15=5>>5 more oranges\n#### 5"
+        "solution": "There are 60 minutes in an hour. Ana peels an orange in 3 minutes so she will peel 60/3 = <<60/3=20>>20 oranges in an hour<|reserved_special_token_0|>Jane peels an orange in 4 minutes so she will peel 60/4 = <<60/4=15>>15 oranges in an hour<|reserved_special_token_0|>Ana will have peeled 20-15 = <<20-15=5>>5 more oranges<|reserved_special_token_0|>#### 5"
     },
     {
         "problem": "Arthur has 3 dogs. They eat an average of 15 pounds of food a week. One dog eats 13 pounds a week. The second eats double this. How much does the third dog eat a week?",
-        "solution": "Calculate the second dog's food consumption. Second dog's food = 13 pounds × 2 = <<13*2=26>> pounds.\nCalculate the total food consumption of the first two dogs. First two dogs' food = 13 pounds + 26 pounds = <<13+26=39>> pounds.\nCalculate the third dog's food consumption. Third dog's food = Total food - First two dogs' food = 15 pounds - 39 pounds = <<15-9=-24>> pounds.\nSince a dog cannot eat a negative amount of food, the given information is inconsistent.\n#### None"
+        "solution": "Calculate the second dog's food consumption. Second dog's food = 13 pounds × 2 = <<13*2=26>> pounds.<|reserved_special_token_0|>Calculate the total food consumption of the first two dogs. First two dogs' food = 13 pounds + 26 pounds = <<13+26=39>> pounds.<|reserved_special_token_0|>Calculate the third dog's food consumption. Third dog's food = Total food - First two dogs' food = 15 pounds - 39 pounds = <<15-9=-24>> pounds.<|reserved_special_token_0|>Since a dog cannot eat a negative amount of food, the given information is inconsistent.<|reserved_special_token_0|>#### None"
     }
 ]
