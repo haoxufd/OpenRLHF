@@ -240,6 +240,7 @@ class NaiveExperienceMaker(ABC):
             sequences = experience.sequences
             seq_len = sequences.size(1)
             response_sequences = sequences[:, (seq_len - num_actions):].tolist()
+            assert response_sequences.shape == experience.kl.shape
             eostep_indices = self.get_eostep_indices(response_sequences, reward)
             self.logger.info("End of Step Indices:")
             self.logger.info(eostep_indices)
@@ -656,6 +657,9 @@ class NaiveExperienceMaker(ABC):
                 eostep_indices[-1].append(len(response_sequences[i]))
         
         return eostep_indices
+    
+    def get_eostep_indices_st(self, response_sequences, reward):
+        pass
 
     @torch.no_grad()
     def process_experiences(self, experiences: List[Experience]) -> Tuple[List[Experience], List[List[List[float]]]]:

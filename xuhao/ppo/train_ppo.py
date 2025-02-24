@@ -300,7 +300,7 @@ if __name__ == "__main__":
     save_value_network = True
     qwen = "/home/user/models/Qwen2.5-1.5B-Instruct"
     llama = "/root/data/models/Meta-Llama-3.1-8B-Instruct"
-    llama_actor = "/root/data/models/actor-llama-3.1-8b-sft-gsm8k"
+    llama_actor = "/root/data/models/actor-llama-3.1-8b-sft-gsm8k-st"
     llama_reward = "/root/data/models/reward-llama-3.1-8b-sft-gsm8k"
     pretrain = llama_actor
     reward_pretrain = llama_reward
