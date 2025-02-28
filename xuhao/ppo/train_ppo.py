@@ -307,26 +307,15 @@ if __name__ == "__main__":
     critic_pretrain = llama
     prompt_data = "openai/gsm8k"
 
-    if not debug:
-        micro_train_batch_size = 4
-        train_batch_size = 60
-        micro_rollout_batch_size = 4
-        rollout_batch_size = 60 * 3
-        reward_model_generate_batch_size = 4
-        max_train_samples = 100000
-        max_test_samples = 100
-        eval_steps = 1e8
-        save_steps = 1e8
-    else:
-        micro_train_batch_size = 4
-        train_batch_size = torch.cuda.device_count() * micro_train_batch_size
-        micro_rollout_batch_size = 4
-        rollout_batch_size = torch.cuda.device_count() * micro_rollout_batch_size
-        reward_model_generate_batch_size = 4
-        max_train_samples = 16
-        max_test_samples = 16
-        eval_steps = 1
-        save_steps = 1
+    micro_train_batch_size = 2
+    train_batch_size = 6
+    micro_rollout_batch_size = 2
+    rollout_batch_size = 18
+    reward_model_generate_batch_size = 4
+    max_train_samples = 100000
+    max_test_samples = 100
+    eval_steps = 1e8
+    save_steps = 1e8
 
     gradient_checkpointing = True
     bf16 = True

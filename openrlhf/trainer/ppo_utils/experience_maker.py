@@ -502,6 +502,9 @@ class NaiveExperienceMaker(ABC):
         self.logger.info("Picked items>>>>>>")
         self.logger.info(picked_items)
 
+        if picked_items == []:
+            picked_items = [0]
+
         return r, picked_items
 
     @torch.no_grad()
