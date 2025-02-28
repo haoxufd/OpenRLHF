@@ -14,7 +14,12 @@ def preprocess_data(data, input_template=None, input_key="question", output_key=
     assert apply_chat_template is not None
 
     prompt_message = data[input_key]
-    response_message = data[output_key].replace("\n", "<|reserved_special_token_0|>")
+    # 仿照 prm 的做法, 在每个步骤后面添加一个 special token, 对于最后一个步骤, 只在最终答案后面添加 special token
+    # 同时, 步骤后面的换行符不要省略
+    response_message = data[output_key].replace("\n", "\n<|reserved_special_token_0|>")
+    last_special_token_idx = response_message.rfind("<|reserved_special_token_0|>")
+    response_message = response_message[:last_special_token_idx] + response_message[last_special_token_idx + len("<|reserved_special_token_0|>"):]
+    response_message += "<|reserved_special_token_0|>"
     assert isinstance(prompt_message, str) and isinstance(response_message, str)
     
     system_message = [{"role": "system", "content": system_message}]
@@ -22,8 +27,8 @@ def preprocess_data(data, input_template=None, input_key="question", output_key=
     response_message = [{"role": "assistant", "content": response_message}]
 
     prompt = apply_chat_template(prompt_message, tokenize=False, add_generation_prompt=True)
-    response = apply_chat_template(prompt_message + response_message, tokenize=False)[len(prompt) :]
-
+    # apply_chat_template 只会在最后添加 <|eot_id|> 表示一个 role message 的结束, 这里应该添加 <|end_of_text|> 表示整个对话结束
+    response = apply_chat_template(prompt_message + response_message, tokenize=False)[len(prompt) :] + "<|end_of_text|>"
 
     return prompt, response
 

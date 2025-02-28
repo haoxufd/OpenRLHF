@@ -161,7 +161,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     eval_steps = 10
-    eval_acc_steps = 100000000
+    eval_acc_steps = 1e8
     pretrain = "/root/data/models/Meta-Llama-3.1-8B"
     max_samples = 1e8
     dataset = "openai/gsm8k"
@@ -173,7 +173,7 @@ if __name__ == "__main__":
     ckpt_path = "/root/data/sft_am/ckpt_1/checkpoints_sft"
 
     micro_train_batch_size = 8
-    train_batch_size = 64
+    train_batch_size = 48
 
 
     # Checkpoint

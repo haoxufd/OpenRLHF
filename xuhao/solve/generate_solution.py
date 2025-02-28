@@ -15,9 +15,8 @@ from torch.utils.data import Dataset
 
 from xuhao.utils import blending_datasets
 
-home_dir = "/root"
-solution_system_message_file = f"{home_dir}/OpenRLHF/xuhao/solve/data/input/solution_system_message.txt"
-solution_few_shot_file = f"{home_dir}/OpenRLHF/xuhao/sft_am/data/input/few_shot.json"
+solution_system_message_file = "xuhao/solve/data/input/solution_system_message.txt"
+solution_few_shot_file = "xuhao/solve/data/input/solution_few_shot.json"
 
 def preprocess_data(data, input_key, apply_chat_template) -> str:
     with open(solution_system_message_file, 'r') as f1, open(solution_few_shot_file, 'r') as f2:
@@ -26,7 +25,7 @@ def preprocess_data(data, input_key, apply_chat_template) -> str:
 
     data = data[input_key]
     messages = [{"role": "system", "content": system_message}]
-    for example in few_shot_examples:
+    for example in few_shot_examples[]:
         messages.append({"role": "user", "content": example["problem"]})
         messages.append({"role": "assistant", "content": example["solution"]})
     messages.append({"role": "user", "content": data})
@@ -158,7 +157,7 @@ def batch_generate(args):
                 eos_token_id=tokenizer.eos_token_id,
             )
             input_length = inputs["input_ids"].shape[1]
-            outputs = tokenizer.batch_decode(outputs[:, input_length:], skip_special_tokens=False)
+            outputs = tokenizer.batch_decode(outputs, skip_special_tokens=False)
             for i, output in enumerate(outputs):
                 # 保存索引和输出的对应关系
                 indexed_outputs.append((batch_indices[i], output))
@@ -195,12 +194,12 @@ def main():
     pretrain = "/root/data/sft_am/ckpt_1"
     dataset = "openai/gsm8k"
     input_key = "question"
-    max_samples = 1e8
+    max_samples = 8
     output_path = "xuhao/solve/data/output/solution_llama-instruct-special-token_gsm8k-test.json"
     prompt_max_length = 4096
     max_new_tokens = 1024
     micro_batch_size = 8
-    train_batch_size = 64
+    train_batch_size = 8
     dataset_split = "test"
 
     torch.cuda.empty_cache()
