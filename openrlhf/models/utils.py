@@ -32,17 +32,20 @@ def compute_reward_new(
         kl_coef = 0.0
 
     # Convert rewards to tensor and apply clipping if needed
-    max_seq_len = action_mask.size(1) if action_mask is not None else max(len(indices) for indices in eostep_indices)
     batch_size = len(r)
     
     if action_mask is not None:
+        eos_indices = action_mask.size(1) - 1 - action_mask.long().fliplr().argmax(dim=1, keepdim=True)
+        eos_indices = eos_indices.tolist()
+        assert len(eos_indices) == len(eostep_indices)
+        for i in range(len(eos_indices)):
+            eostep_indices[i][-1] = eos_indices[i][0]
         kl_reward = -kl_coef * kl
         # Initialize reward tensor
-        last_reward = torch.zeros_like(kl)
+        last_reward = torch.zeros_like(kl, dtype=kl.dtype)
         
         # Distribute rewards to specified indices
         for i in range(batch_size):
-            assert len(r[i]) == len(eostep_indices[i])
             curr_r = torch.tensor(r[i], device=kl.device, dtype=torch.float32)
             if reward_clip_range:
                 curr_r = curr_r.clamp(min=reward_clip_range[0], max=reward_clip_range[1])

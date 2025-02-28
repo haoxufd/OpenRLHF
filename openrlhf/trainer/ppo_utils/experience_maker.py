@@ -16,6 +16,7 @@ from openrlhf.models.actor import Actor
 from openrlhf.models.utils import compute_approx_kl, compute_reward_new, masked_mean
 from openrlhf.utils.logging_utils import init_file_logger
 
+from openrlhf.utils.utils import convert_token_to_id
 from xuhao.utils import get_steps
 from xuhao.utils import get_final_value_from_solution
 from xuhao.utils import find_newline_indices
@@ -212,7 +213,6 @@ class NaiveExperienceMaker(ABC):
         args = self.strategy.args
         # generate responses
         samples_list = self.generate_samples(all_prompts, **generate_kwargs)
-        torch.distributed.barrier()
 
         num_samples = len(samples_list)
         self.logger.info(f"There are totally {num_samples} 'Samples', is going to make {num_samples} 'Experience'")
@@ -233,19 +233,22 @@ class NaiveExperienceMaker(ABC):
 
         # calculate return and advantages
         idx = 0
+        step_split_token_id = convert_token_to_id(args.step_split_str, self.tokenizer)
         for experience, reward in zip(experiences, rewards):
-            prompt_start_idx = idx * args.micro_rollout_batch_size
             experience = experience.to_device("cuda")
             num_actions = experience.info["num_actions"]
             sequences = experience.sequences
             seq_len = sequences.size(1)
             response_sequences = sequences[:, (seq_len - num_actions):].tolist()
-            assert response_sequences.shape == experience.kl.shape
-            eostep_indices = self.get_eostep_indices(response_sequences, reward)
+            assert sequences[:, (seq_len - num_actions):].shape == experience.kl.shape
+            eostep_indices = self.get_eostep_indices(response_sequences, step_split_token_id)
             self.logger.info("End of Step Indices:")
             self.logger.info(eostep_indices)
             self.logger.info("Reward of Current Experience:")
             self.logger.info(reward)
+            assert len(eostep_indices) == len(reward)
+            for i in range(len(eostep_indices)):
+                assert len(eostep_indices[i]) == len(reward[i])
             reward = compute_reward_new(
                 reward,
                 eostep_indices,
@@ -355,15 +358,13 @@ class NaiveExperienceMaker(ABC):
                 tmp = [self.get_problem_and_solution_llama(text) for text in texts]
                 problems = [x[0] for x in tmp]
                 solutions = [x[1] for x in tmp]
-                self.logger.info("Problems of current micro rollout batch:")
-                self.logger.info(problems)
-                self.logger.info("Solutions of current micro rollout batch:")
-                self.logger.info(solutions)
                 all_valid = all([solution_end_is_valid(solution) for solution in solutions])
 
                 if all_valid:
                     break
                 else:
+                    self.logger.info(f"Problems are {problems}")
+                    self.logger.info(f"Solutions are {solutions}")
                     self.logger.info("There are invalid solutions, regenerating......")
 
             if sequences.size(0) > 0:
@@ -390,14 +391,10 @@ class NaiveExperienceMaker(ABC):
         step = f"{num_previous_steps + 1}. " + step
         data = f"Problem:\n{problem}\n\nReference Solution:\n{ref_solution}\n\nPrevious Steps:\n{previous_steps}\n\nStep to Evaluate:\n{step}"
 
-        with open(self.verification_system_message_file, 'r') as f1, open(self.verification_few_shot_file, 'r') as f2:
-            system_message = f1.read()
-            few_shot_examples = json.load(f2)
+        with open(self.verification_system_message_file, 'r') as f:
+            system_message = f.read()
 
         messages = [{"role": "system", "content": system_message}]
-        # for example in few_shot_examples[:1]:
-        #     messages.append({"role": "user", "content": example["input"]})
-        #     messages.append({"role": "assistant", "content": example["output"]})
         messages.append({"role": "user", "content": data})
         prompt = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
 
@@ -485,7 +482,8 @@ class NaiveExperienceMaker(ABC):
         self.logger.info("Verification result for all solutions>>>>>>")
         for idx, output in enumerate(outputs):
             self.logger.info(f"Verification result for solution {idx}>>>>>>")
-            for data in output:
+            for idy, data in enumerate(output):
+                self.logger.info(f"Step {idy}>>>>>>")
                 self.logger.info(data)
 
         for reward in r:
@@ -505,55 +503,6 @@ class NaiveExperienceMaker(ABC):
         self.logger.info(picked_items)
 
         return r, picked_items
-
-    def process_in_batches(self, model, sequences, num_actions, attention_mask, batch_size=4):
-        """
-        Process sequences in smaller batches to avoid CUDA OOM errors.
-        
-        Args:
-            sequences: Input tensor of shape (n * m)
-            num_actions: int
-            attention_mask: Input tensor of shape (n * m)
-            batch_size: Number of sequences to process at once
-            
-        Returns:
-            Concatenated results from all batches
-        """
-        # Get total number of sequences
-        total_sequences = sequences.size(0)
-        
-        # Calculate number of batches needed
-        num_batches = (total_sequences + batch_size - 1) // batch_size
-        
-        # List to store results from each batch
-        all_results = []
-        
-        for i in range(num_batches):
-            # Calculate start and end indices for current batch
-            start_idx = i * batch_size
-            end_idx = min((i + 1) * batch_size, total_sequences)
-            
-            # Get current batch of data
-            batch_sequences = sequences[start_idx:end_idx]
-            batch_attention_mask = attention_mask[start_idx:end_idx]
-            
-            # Process current batch
-            
-            batch_result = model(
-                batch_sequences,
-                num_actions,
-                batch_attention_mask
-            )
-            
-            # Store batch result
-            all_results.append(batch_result)
-            
-            # Optional: Clear CUDA cache after each batch
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-        
-        # Concatenate all batch results
-        return torch.cat(all_results, dim=0)
 
     @torch.no_grad()
     def make_experience(self, samples: Samples) -> Experience|None:
@@ -628,39 +577,27 @@ class NaiveExperienceMaker(ABC):
     def find_solution_end_index(self, solution: str):
         return solution.find("<|im_end|>") - 1
 
-    def get_eostep_indices(self, response_sequences, reward):
+    def get_eostep_indices(self, response_sequences, step_split_token_id):
         """
         response_sequences 和 reward 对应一个 Experience
         """
-        solutions = self.tokenizer.batch_decode(response_sequences, skip_special_tokens=False)
-        assert len(solutions) == len(reward)
-
         eostep_indices = []
-        for i in range(len(solutions)):
-            solution = solutions[i]
-            step_reward = reward[i]
-            step_end_indices = find_newline_indices(solution)
-            # if "####" not in solution.split('\n')[-1]:
-            #     step_end_indices.append(self.find_solution_end_index(solution))
-            if len(step_end_indices) != len(step_reward):
-                print(self.strategy.get_rank())
-                self.strategy.print(solution)
-                self.strategy.print(step_reward)
-                self.strategy.print(step_end_indices)
-            assert len(step_end_indices) == len(step_reward)
-            substrings = [solution[: j + 1] for j in step_end_indices]
-            batch = self.tokenizer.batch_encode_plus(substrings)
-            eostep_indices.append([len(x) for x in batch["input_ids"]])
-            if "####" not in solution.split('\n')[-1]:
-                # actor 生成的 solution 可能不规范, 偶尔内容一直重复, 到最大长度限制后停止
-                # 这种情况下
-                eostep_indices[-1].append(len(response_sequences[i]))
-        
+
+        for response in response_sequences:
+            indices = []
+            start = 0
+            while start < len(response):
+                try:
+                    # 查找 step_split_token_id 在 response 中的位置
+                    idx = response.index(step_split_token_id, start)
+                    indices.append(idx)
+                    start = idx + 1
+                except ValueError:
+                    break
+            eostep_indices.append(indices)
+    
         return eostep_indices
     
-    def get_eostep_indices_st(self, response_sequences, reward):
-        pass
-
     @torch.no_grad()
     def process_experiences(self, experiences: List[Experience]) -> Tuple[List[Experience], List[List[List[float]]]]:
         """

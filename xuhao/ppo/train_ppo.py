@@ -309,14 +309,14 @@ if __name__ == "__main__":
 
     if not debug:
         micro_train_batch_size = 4
-        train_batch_size = 128
+        train_batch_size = 60
         micro_rollout_batch_size = 4
-        rollout_batch_size = 512
+        rollout_batch_size = 60 * 3
         reward_model_generate_batch_size = 4
         max_train_samples = 100000
         max_test_samples = 100
-        eval_steps = 1000
-        save_steps = 1000
+        eval_steps = 1e8
+        save_steps = 1e8
     else:
         micro_train_batch_size = 4
         train_batch_size = torch.cuda.device_count() * micro_train_batch_size
@@ -346,6 +346,8 @@ if __name__ == "__main__":
     num_episodes = 2
     max_epochs = 2
 
+    step_split_str = "<|reserved_special_token_0|>"
+
     parser = argparse.ArgumentParser()
     # Checkpoint
     parser.add_argument("--save_path", type=str, default=save_path)
@@ -360,6 +362,7 @@ if __name__ == "__main__":
     parser.add_argument("--load_checkpoint", action="store_true", default=load_checkpoint)
 
     # PPO
+    parser.add_argument("--step_split_str", type=str, default=step_split_str)
     parser.add_argument("--num_episodes", type=int, default=num_episodes)
     parser.add_argument("--rollout_batch_size", type=int, default=rollout_batch_size)
     parser.add_argument("--micro_rollout_batch_size", type=int, default=micro_rollout_batch_size)
@@ -471,7 +474,7 @@ if __name__ == "__main__":
     )
 
     # wandb parameters
-    parser.add_argument("--use_wandb", type=str, default=True)
+    parser.add_argument("--use_wandb", type=str, default=None)
     parser.add_argument("--wandb_org", type=str, default=None)
     parser.add_argument("--wandb_group", type=str, default=None)
     parser.add_argument("--wandb_project", type=str, default="openrlhf_train_ppo")

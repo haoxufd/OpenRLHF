@@ -147,12 +147,14 @@ def get_solve_result(solution: list, ref_solution: list):
 def get_steps(solution: str):
     """
     """
-    steps = solution.strip().split('\n')
+    steps = solution.strip().split('<|reserved_special_token_0|>')
     result = []
     for step in steps:
         if step:
-            result.append(step)
-    return result[:-1] if "####" in result[-1] else result
+            result.append(step.strip())
+    result[-1] = result[-1].split("####")[0].strip() if "####" in result[-1] else result[-1]
+
+    return result
 
 def get_final_value_from_solution(solution: str) -> float | None:
     content = solution.split("####")[-1] if "####" in solution else solution.split('\n')[-1]
@@ -172,6 +174,7 @@ def find_newline_indices(s):
 def find_numbers(text: str):
     pattern = r'-?(?:\d*\.?\d+|\.\d+)(?:,\d{3})*'
     res = re.findall(pattern, text)
+    # TODO: 识别分数, 如 1/4
     res = [float(x.replace(',', '')) for x in res]
     return res
 
@@ -206,9 +209,4 @@ def group_elements(elements, group_sizes):
     return result
 
 def solution_end_is_valid(solution: str):
-    steps = solution.split('\n')
-    last_step = steps[-1].strip()
-    if not (re.match(r"^####\s*-?[\d,]*(\.[\d,]+)?$", last_step) or re.match(r"^####\s+None$", last_step)):
-        return False
-    
-    return True
+    return solution.endswith('<|reserved_special_token_0|>')

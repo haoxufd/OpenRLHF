@@ -232,20 +232,19 @@ class PPOTrainer(ABC):
 
             self.logger.info("Rollout......")
             for rand_prompts in self.prompts_dataloader:
-                torch.distributed.barrier()
                 self.logger.info(f"Step {steps}")
                 exp_list = self.experience_maker.make_experience_list(rand_prompts, **self.generate_kwargs)
                 
                 for i, experience in enumerate(exp_list):
                     self.replay_buffer.append(experience)
 
-                # 1. 首先同步所有进程的数据量
+                # 首先同步所有进程的数据量
                 local_size = len(self.replay_buffer)
                 size_tensor = torch.LongTensor([local_size]).cuda()
                 torch.distributed.all_reduce(size_tensor, op=torch.distributed.ReduceOp.MIN)
                 min_size = int(size_tensor.item())
             
-                # 2. 所有进程都使用相同的最小数据量
+                # 所有进程都使用相同的最小数据量
                 if local_size > min_size:
                     self.replay_buffer.items = self.replay_buffer.items[:min_size]
 
@@ -259,9 +258,8 @@ class PPOTrainer(ABC):
                     self.kl_ctl.update(status["kl"], args.rollout_batch_size * args.n_samples_per_prompt)
             
                 pbar.set_postfix(status)
-                if self.strategy.is_rank_0():
-                    self.logger.info(f"Status of step {steps}")
-                    self.logger.info(status)
+                self.logger.info(f"Status of step {steps}")
+                self.logger.info(status)
                 # logs/checkpoints
                 client_states = {"consumed_samples": steps * args.rollout_batch_size}
                 self.save_logs_and_checkpoints(args, steps, pbar, status, client_states)
@@ -275,8 +273,6 @@ class PPOTrainer(ABC):
             self._tensorboard.close()
 
     def ppo_train(self, global_steps=0):
-        torch.distributed.barrier()
-
         # replay buffer may be empty at first, we should rebuild at each training
         dataloader = DataLoader(
             self.replay_buffer,
@@ -291,7 +287,6 @@ class PPOTrainer(ABC):
         status_list = []
         status_mean = {}
         for epoch in range(self.max_epochs):
-            torch.distributed.barrier()
             pbar = tqdm(
                 dataloader,
                 desc=f"Train epoch [{epoch + 1}/{self.max_epochs}]",
@@ -330,7 +325,6 @@ class PPOTrainer(ABC):
                 status_list.append(status)
                 pbar.set_postfix(short_status)
 
-        torch.distributed.barrier()
         if status_list:
             status_mean = status_list[0]
             for m in status_list[1:]:
