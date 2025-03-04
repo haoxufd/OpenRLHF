@@ -25,9 +25,9 @@ def preprocess_data(data, input_key, apply_chat_template) -> str:
 
     data = data[input_key]
     messages = [{"role": "system", "content": system_message}]
-    for example in few_shot_examples[]:
-        messages.append({"role": "user", "content": example["problem"]})
-        messages.append({"role": "assistant", "content": example["solution"]})
+    # for example in few_shot_examples:
+    #     messages.append({"role": "user", "content": example["problem"]})
+    #     messages.append({"role": "assistant", "content": example["solution"]})
     messages.append({"role": "user", "content": data})
     prompt = apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
 
@@ -191,11 +191,11 @@ def batch_generate(args):
             json.dump(sorted_outputs, f, indent=4)
 
 def main():
-    pretrain = "/root/data/sft_am/ckpt_1"
+    pretrain = "/root/data/models/actor-llama-3.1-8b-sft-gsm8k-st"
     dataset = "openai/gsm8k"
     input_key = "question"
-    max_samples = 8
-    output_path = "xuhao/solve/data/output/solution_llama-instruct-special-token_gsm8k-test.json"
+    max_samples = 128
+    output_path = "xuhao/solve/data/output/solution_actor_with_st_in_gsm8k_test.json"
     prompt_max_length = 4096
     max_new_tokens = 1024
     micro_batch_size = 8
