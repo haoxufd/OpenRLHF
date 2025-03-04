@@ -322,6 +322,7 @@ if __name__ == "__main__":
     prompt_max_len = 1024
     generate_max_len = 512
     rm_prompt_max_len = 2048
+    num_beams = 2
 
     correct_step_reward = 1.0
     incorrect_step_reward = 0
@@ -357,6 +358,7 @@ if __name__ == "__main__":
     parser.add_argument("--micro_rollout_batch_size", type=int, default=micro_rollout_batch_size)
     parser.add_argument("--reward_model_generate_batch_size", type=int, default=reward_model_generate_batch_size)
     parser.add_argument("--max_epochs", type=int, default=max_epochs)
+    parser.add_argument("--num_beams", type=int, default=num_beams)
     parser.add_argument("--prompt_max_len", type=int, default=prompt_max_len, help="Max tokens for each prompt")
     parser.add_argument("--generate_max_len", type=int, default=generate_max_len, help="Max tokens to generate in PPO")
     parser.add_argument("--rm_prompt_max_len", type=int, default=rm_prompt_max_len)
@@ -369,7 +371,7 @@ if __name__ == "__main__":
     parser.add_argument("--eps_clip", type=float, default=0.2, help="PPO clip range")
     parser.add_argument("--value_clip", type=float, default=0.2, help="PPO value clip range")
     parser.add_argument("--lambd", type=float, default=0.95, help="PPO GAE lambd")
-    parser.add_argument("--gamma", type=float, default=1, help="PPO GAE gamma")
+    parser.add_argument("--gamma", type=float, default=0.99, help="PPO GAE gamma")
     parser.add_argument("--micro_train_batch_size", type=int, default=micro_train_batch_size, help="batch size per GPU")
     parser.add_argument("--train_batch_size", type=int, default=train_batch_size, help="Global training batch size")
     parser.add_argument("--normalize_reward", action="store_true", default=False, help="Enable Reward Normazation")
