@@ -1,6 +1,4 @@
 from typing import Optional, Tuple, Union
-
-from numpy import float32
 import torch
 import torch.nn.functional as F
 
@@ -9,10 +7,9 @@ def compute_reward_new(
     eostep_indices: list[list[int]],
     kl_coef: float,
     kl: Union[torch.Tensor, list[torch.Tensor]],
-    action_mask: Optional[torch.Tensor] = None,
-    num_actions: Optional[Union[int, list[int]]] = None,
-    reward_clip_range: Tuple[float, float] = None
-) -> Union[torch.Tensor, list[torch.Tensor]]:
+    action_mask: Optional[torch.Tensor],
+    reward_clip_range: Tuple[float, float]
+) -> torch.Tensor:
     """
     Modified reward computation function that handles variable-length rewards and custom indices.
     
@@ -34,50 +31,35 @@ def compute_reward_new(
     # Convert rewards to tensor and apply clipping if needed
     batch_size = len(r)
     
-    if action_mask is not None:
-        eos_indices = action_mask.size(1) - 1 - action_mask.long().fliplr().argmax(dim=1, keepdim=True)
-        eos_indices = eos_indices.tolist()
-        assert len(eos_indices) == len(eostep_indices)
-        for i in range(len(eos_indices)):
-            eostep_indices[i][-1] = eos_indices[i][0]
-        kl_reward = -kl_coef * kl
-        # Initialize reward tensor
-        last_reward = torch.zeros_like(kl, dtype=kl.dtype)
+    eos_indices = action_mask.size(1) - 1 - action_mask.long().fliplr().argmax(dim=1, keepdim=True)
+    eos_indices = eos_indices.tolist()
+    assert len(eos_indices) == len(eostep_indices)
+    for i in range(len(eos_indices)):
+        eostep_indices[i][-1] = eos_indices[i][0]
+    kl_reward = -kl_coef * kl
+    # Initialize reward tensor
+    last_reward = torch.zeros_like(kl, dtype=kl.dtype)
+    
+    # Distribute rewards to specified indices
+    for i in range(batch_size):
+        curr_r = torch.tensor(r[i], device=kl.device, dtype=kl.dtype)
+        curr_r = curr_r.clamp(min=reward_clip_range[0], max=reward_clip_range[1])
         
-        # Distribute rewards to specified indices
-        for i in range(batch_size):
-            curr_r = torch.tensor(r[i], device=kl.device, dtype=torch.float32)
-            if reward_clip_range:
-                curr_r = curr_r.clamp(min=reward_clip_range[0], max=reward_clip_range[1])
-            
-            # Convert indices to tensor
-            curr_indices = torch.tensor(eostep_indices[i], device=kl.device, dtype=torch.long)
-            
-            # Create index tensor for scatter operation
-            batch_idx = torch.full_like(curr_indices, i)
-            indices_2d = torch.stack([batch_idx, curr_indices], dim=0)
-            
-            # Distribute rewards
-            last_reward.index_put_(
-                (indices_2d[0], indices_2d[1]),
-                curr_r,
-                accumulate=True
-            )
-            
-        reward = last_reward + kl_reward
-    else:
-        reward = []
-        for i, (kl_seg, action_len) in enumerate(zip(kl, num_actions)):
-            kl_reward = -kl_coef * kl_seg
-            curr_r = torch.tensor(r[i], device=kl_seg.device)
-            if reward_clip_range:
-                curr_r = curr_r.clamp(min=reward_clip_range[0], max=reward_clip_range[1])
-            
-            # Add rewards at specified indices
-            for idx, r_val in zip(eostep_indices[i], curr_r):
-                kl_reward[idx] += r_val
-                
-            reward.append(kl_reward)
+        # Convert indices to tensor
+        curr_indices = torch.tensor(eostep_indices[i], device=kl.device, dtype=torch.long)
+        
+        # Create index tensor for scatter operation
+        batch_idx = torch.full_like(curr_indices, i)
+        indices_2d = torch.stack([batch_idx, curr_indices], dim=0)
+        
+        # Distribute rewards
+        last_reward.index_put_(
+            (indices_2d[0], indices_2d[1]),
+            curr_r,
+            accumulate=True
+        )
+        
+    reward = last_reward + kl_reward
     
     return reward
 

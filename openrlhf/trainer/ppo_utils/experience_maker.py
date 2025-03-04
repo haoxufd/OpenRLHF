@@ -3,25 +3,21 @@ from abc import ABC
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import List, Optional, Tuple, Union
-from numpy import info
-from sympy import Float
 import torch
 import torch.nn as nn
 from tqdm import tqdm
-import json
-
-import re
 
 from openrlhf.models.actor import Actor
 from openrlhf.models.utils import compute_approx_kl, compute_reward_new, masked_mean
-from openrlhf.utils.logging_utils import init_file_logger
 
 from openrlhf.utils.utils import convert_token_to_id
 from xuhao.utils import get_steps
 from xuhao.utils import get_final_value_from_solution
-from xuhao.utils import find_newline_indices
 from xuhao.utils import group_elements
 from xuhao.utils import solution_end_is_valid
+from xuhao.utils import get_eostep_indices
+
+from openrlhf.utils.utils import convert_token_to_id
 
 
 def to(tensor: Union[torch.Tensor, list[torch.Tensor]], device):
@@ -241,21 +237,36 @@ class NaiveExperienceMaker(ABC):
             seq_len = sequences.size(1)
             response_sequences = sequences[:, (seq_len - num_actions):].tolist()
             assert sequences[:, (seq_len - num_actions):].shape == experience.kl.shape
-            eostep_indices = self.get_eostep_indices(response_sequences, step_split_token_id)
+
+            for i in range(len(response_sequences)):
+                # 判断 response 是以 <|eot_id|><|end_of_text|> 结尾还是以 <|reserved_special_token_0|><|end_of_text|> 结尾
+                # 如果以 <|eot_id|><|end_of_text|> 结尾, reward 额外 +1
+                first_end_of_text_idx = response_sequences[i].index(convert_token_to_id("<|end_of_text|>", self.tokenizer))
+                if response_sequences[i][first_end_of_text_idx - 1] == convert_token_to_id("<|eot_id|>", self.tokenizer):
+                    reward[i][-1] += 1
+            
+            # 更新 experience.info["reward"]
+            average_rewards = [sum(sublist) / len(sublist) for sublist in reward]
+            average_rewards_tensor = torch.tensor(average_rewards, dtype=torch.float32)
+            experience.info["reward"] = average_rewards_tensor
+
+            eostep_indices = get_eostep_indices(response_sequences, step_split_token_id)
             self.logger.info("End of Step Indices:")
             self.logger.info(eostep_indices)
             self.logger.info("Reward of Current Experience:")
             self.logger.info(reward)
             assert len(eostep_indices) == len(reward)
             for i in range(len(eostep_indices)):
-                assert len(eostep_indices[i]) == len(reward[i])
+                assert len(eostep_indices[i]) == len(reward[i]) or len(eostep_indices[i]) == (len(reward[i]) + 1)
+                if len(eostep_indices[i]) == (len(reward[i]) + 1):
+                    assert eostep_indices[i][-1] ==  (eostep_indices[i][-2] + 1)
+                    eostep_indices[i].pop(-1)
             reward = compute_reward_new(
                 reward,
                 eostep_indices,
                 self.kl_ctl.value,
                 experience.kl,
-                action_mask=experience.action_mask,
-                num_actions=num_actions,
+                experience.action_mask,
                 reward_clip_range=args.reward_clip_range,
             )
 
@@ -288,7 +299,6 @@ class NaiveExperienceMaker(ABC):
             # remove unnecessary info
             experience.kl = None
             del experience.info["num_actions"]
-            del experience.info["reward"]
             experience.to_device("cpu")
             idx += 1
         return experiences
@@ -322,7 +332,7 @@ class NaiveExperienceMaker(ABC):
         tmp = text.split(user_split)[-1]
         problem = tmp[:tmp.find(round_end)].strip()
         tmp = text.split(assistant_split)[-1]
-        solution = tmp[:tmp.find(round_end)].strip()
+        solution = tmp[:tmp.find(text_end)].strip()
 
         return problem, solution
 
@@ -340,18 +350,13 @@ class NaiveExperienceMaker(ABC):
         all_ref_solutions = sum([[ref_sol] * args.n_samples_per_prompt for ref_sol in all_prompts[1]], [])
         samples_list = []
         for i in range(0, len(all_problems), args.micro_rollout_batch_size):
-            self.logger.info(f"Micro rollout batch {i}")
+            self.logger.info(f"Micro rollout batch {i / args.micro_rollout_batch_size}")
             prompts = all_problems[i : i + args.micro_rollout_batch_size]
             ref_solutions = all_ref_solutions[i : i + args.micro_rollout_batch_size]
             inputs = self.tokenize_fn(prompts, self.prompt_max_len, device=torch.cuda.current_device())
 
             while True:
-                sequences, attention_mask, action_mask = self.actor.generate(
-                    **inputs,
-                    early_stopping=False,
-                    num_beams=2,
-                    repetition_penalty=1.0,
-                    **generate_kwargs)
+                sequences, attention_mask, action_mask = self.actor.generate(**inputs, **generate_kwargs)
                 
                 texts = self.tokenizer.batch_decode(sequences, skip_special_tokens=False)
                 
@@ -421,7 +426,7 @@ class NaiveExperienceMaker(ABC):
 
         self.logger.info("Problems>>>>>>")
         self.logger.info(problems)
-        self.logger.info("Solutions>>>>>>:")
+        self.logger.info("Solutions>>>>>>")
         self.logger.info(solutions)
         self.logger.info("Reference solutions>>>>>>")
         self.logger.info(ref_solutions)
@@ -579,27 +584,6 @@ class NaiveExperienceMaker(ABC):
     
     def find_solution_end_index(self, solution: str):
         return solution.find("<|im_end|>") - 1
-
-    def get_eostep_indices(self, response_sequences, step_split_token_id):
-        """
-        response_sequences 和 reward 对应一个 Experience
-        """
-        eostep_indices = []
-
-        for response in response_sequences:
-            indices = []
-            start = 0
-            while start < len(response):
-                try:
-                    # 查找 step_split_token_id 在 response 中的位置
-                    idx = response.index(step_split_token_id, start)
-                    indices.append(idx)
-                    start = idx + 1
-                except ValueError:
-                    break
-            eostep_indices.append(indices)
-    
-        return eostep_indices
     
     @torch.no_grad()
     def process_experiences(self, experiences: List[Experience]) -> Tuple[List[Experience], List[List[List[float]]]]:

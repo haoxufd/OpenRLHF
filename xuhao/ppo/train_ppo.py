@@ -307,15 +307,15 @@ if __name__ == "__main__":
     critic_pretrain = llama
     prompt_data = "openai/gsm8k"
 
-    micro_train_batch_size = 2
-    train_batch_size = 6
-    micro_rollout_batch_size = 2
-    rollout_batch_size = 18
+    micro_train_batch_size = 4
+    train_batch_size = 16
+    micro_rollout_batch_size = 4
+    rollout_batch_size = 64
     reward_model_generate_batch_size = 4
     max_train_samples = 100000
     max_test_samples = 100
-    eval_steps = 1e8
-    save_steps = 1e8
+    eval_steps = 10
+    save_steps = 90
 
     gradient_checkpointing = True
     bf16 = True
@@ -332,8 +332,8 @@ if __name__ == "__main__":
     log_path = "/root/data/ppo/log_1"
     eval_output_path = "/root/data/ppo/eval_output_1"
 
-    num_episodes = 2
-    max_epochs = 2
+    num_episodes = 10
+    max_epochs = 1
 
     step_split_str = "<|reserved_special_token_0|>"
 

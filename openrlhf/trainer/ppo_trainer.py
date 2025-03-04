@@ -235,7 +235,7 @@ class PPOTrainer(ABC):
                 self.logger.info(f"Step {steps}")
                 exp_list = self.experience_maker.make_experience_list(rand_prompts, **self.generate_kwargs)
                 
-                for i, experience in enumerate(exp_list):
+                for experience in exp_list:
                     self.replay_buffer.append(experience)
 
                 # 首先同步所有进程的数据量
@@ -307,6 +307,7 @@ class PPOTrainer(ABC):
                 if "policy_loss" in status:
                     short_status = {
                         "pg": status["policy_loss"],
+                        "rm": status["reward"],
                         "ret": status["return"],
                         "glen": status["response_length"],
                         "tlen": status["total_length"],
