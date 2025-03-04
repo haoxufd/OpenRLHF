@@ -241,12 +241,12 @@ class NaiveExperienceMaker(ABC):
             response_sequences = sequences[:, (seq_len - num_actions):].tolist()
             assert sequences[:, (seq_len - num_actions):].shape == experience.kl.shape
 
-            for i in range(len(response_sequences)):
-                # 判断 response 是以 <|eot_id|><|end_of_text|> 结尾还是以 <|reserved_special_token_0|><|end_of_text|> 结尾
-                # 如果以 <|eot_id|><|end_of_text|> 结尾, reward 额外 +1
-                first_end_of_text_idx = response_sequences[i].index(convert_token_to_id("<|end_of_text|>", self.tokenizer))
-                if response_sequences[i][first_end_of_text_idx - 1] == convert_token_to_id("<|eot_id|>", self.tokenizer):
-                    reward[i][-1] += 1
+            # for i in range(len(response_sequences)):
+            #     # 判断 response 是以 <|eot_id|><|end_of_text|> 结尾还是以 <|reserved_special_token_0|><|end_of_text|> 结尾
+            #     # 如果以 <|eot_id|><|end_of_text|> 结尾, reward 额外 +1
+            #     first_end_of_text_idx = response_sequences[i].index(convert_token_to_id("<|end_of_text|>", self.tokenizer))
+            #     if response_sequences[i][first_end_of_text_idx - 1] == convert_token_to_id("<|eot_id|>", self.tokenizer):
+            #         reward[i][-1] += 1
             
             # 更新 experience.info["reward"]
             average_rewards = [sum(sublist) / len(sublist) for sublist in reward]
