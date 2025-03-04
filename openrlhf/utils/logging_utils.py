@@ -54,3 +54,19 @@ def init_logger(name: str):
     logger.addHandler(_default_handler)
     logger.propagate = False
     return logger
+
+def init_file_logger(name: str, log_file: str):
+    logger = logging.getLogger(name)
+    logger.setLevel(logging.DEBUG)
+    
+    # 创建格式器
+    fmt = NewLineFormatter(_FORMAT, datefmt=_DATE_FORMAT)
+    
+    # 创建文件处理器
+    file_handler = logging.FileHandler(log_file)
+    file_handler.setLevel(logging.DEBUG)
+    file_handler.setFormatter(fmt)
+    
+    logger.addHandler(file_handler)
+    logger.propagate = False
+    return logger

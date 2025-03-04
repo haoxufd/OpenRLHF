@@ -3,7 +3,6 @@ from abc import ABC
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import List, Optional, Tuple, Union
-import ray
 import torch
 import torch.nn as nn
 from tqdm import tqdm
@@ -12,11 +11,16 @@ import json
 import re
 
 from openrlhf.models.actor import Actor
-from openrlhf.models.utils import compute_approx_kl, compute_reward, masked_mean, unpacking_samples
-from openrlhf.utils.logging_utils import init_logger
-from openrlhf.utils.remote_rm_utils import remote_rm_fn, remote_rm_fn_ray
+from openrlhf.models.utils import compute_approx_kl, compute_reward_new, masked_mean
 
-logger = init_logger(__name__)
+from openrlhf.utils.utils import convert_token_to_id
+from xuhao.utils import get_steps
+from xuhao.utils import get_final_value_from_solution
+from xuhao.utils import group_elements
+from xuhao.utils import solution_end_is_valid
+from xuhao.utils import get_eostep_indices
+
+from openrlhf.utils.utils import convert_token_to_id
 
 
 def to(tensor: Union[torch.Tensor, list[torch.Tensor]], device):
@@ -114,11 +118,7 @@ class Samples:
     packed_seq_lens: Optional[torch.Tensor]
     response_length: torch.Tensor
     total_length: torch.Tensor
-    problem_list: list[str]
-    previous_steps_list: list[str]
-    step_list: list[str]
-    ref_solution_list: list[str]
-    final_value_list: list[float|None]
+    ref_solutions: list[str]
 
     def subset(self, indices: list[int]) -> "Samples":
         # 提取指定索引的样本
@@ -129,11 +129,7 @@ class Samples:
         packed_seq_lens = self.packed_seq_lens[indices] if self.packed_seq_lens is not None else None
         response_length = self.response_length[indices]
         total_length = self.total_length[indices]
-        problem_list = [self.problem_list[i] for i in indices]
-        previous_steps_list = [self.previous_steps_list[i] for i in indices]
-        step_list = [self.step_list[i] for i in indices]
-        ref_solution_list = [self.ref_solution_list[i] for i in indices]
-        final_value_list = [self.final_value_list[i] for i in indices]
+        ref_solutions = [self.ref_solutions[i] for i in indices]
 
         # 返回新的 Samples 实例
         return Samples(
@@ -144,11 +140,7 @@ class Samples:
             packed_seq_lens=packed_seq_lens,
             response_length=response_length,
             total_length=total_length,
-            problem_list=problem_list,
-            previous_steps_list=previous_steps_list,
-            step_list=step_list,
-            ref_solution_list=ref_solution_list,
-            final_value_list=final_value_list
+            ref_solutions=ref_solutions
         )
 
 
@@ -169,6 +161,7 @@ class NaiveExperienceMaker(ABC):
         strategy=None,
         remote_rm_url: str = None,
         reward_fn=None,
+        logger=None
     ) -> None:
         super().__init__()
         self.actor = actor
@@ -185,6 +178,7 @@ class NaiveExperienceMaker(ABC):
         self.advantage_estimator = strategy.args.advantage_estimator
         self.verification_system_message_file = "xuhao/verify/data/input/verification_system_message.txt"
         self.verification_few_shot_file = "xuhao/verify/data/input/verification_few_shot.json"
+        self.logger = logger
 
     # tokenizer
     def tokenize_fn(self, texts, max_length, padding=True, device=None):
@@ -218,31 +212,64 @@ class NaiveExperienceMaker(ABC):
         args = self.strategy.args
         # generate responses
         samples_list = self.generate_samples(all_prompts, **generate_kwargs)
-        torch.distributed.barrier()
+
+        num_samples = len(samples_list)
+        self.logger.info(f"There are totally {num_samples} 'Samples', is going to make {num_samples} 'Experience'")
 
         experiences = []
+        cnt = 0
         for samples in tqdm(
             samples_list,
             desc="make_experience",
             disable=not self.strategy.is_rank_0(),
         ):
+            self.logger.info(f"Make 'Experience' {cnt}......")
             experience = self.make_experience(samples)
-            if experience is not None:
-                experiences.append(experience.to_device("cpu"))
+            experiences.append(experience.to_device("cpu"))
+            cnt += 1
 
         experiences, rewards = self.process_experiences(experiences)
 
         # calculate return and advantages
+        idx = 0
+        step_split_token_id = convert_token_to_id(args.step_split_str, self.tokenizer)
         for experience, reward in zip(experiences, rewards):
             experience = experience.to_device("cuda")
-            reward = reward.to(device="cuda")
             num_actions = experience.info["num_actions"]
-            reward = compute_reward(
+            sequences = experience.sequences
+            seq_len = sequences.size(1)
+            response_sequences = sequences[:, (seq_len - num_actions):].tolist()
+            assert sequences[:, (seq_len - num_actions):].shape == experience.kl.shape
+
+            for i in range(len(response_sequences)):
+                # 判断 response 是以 <|eot_id|><|end_of_text|> 结尾还是以 <|reserved_special_token_0|><|end_of_text|> 结尾
+                # 如果以 <|eot_id|><|end_of_text|> 结尾, reward 额外 +1
+                first_end_of_text_idx = response_sequences[i].index(convert_token_to_id("<|end_of_text|>", self.tokenizer))
+                if response_sequences[i][first_end_of_text_idx - 1] == convert_token_to_id("<|eot_id|>", self.tokenizer):
+                    reward[i][-1] += 1
+            
+            # 更新 experience.info["reward"]
+            average_rewards = [sum(sublist) / len(sublist) for sublist in reward]
+            average_rewards_tensor = torch.tensor(average_rewards, dtype=torch.float32)
+            experience.info["reward"] = average_rewards_tensor
+
+            eostep_indices = get_eostep_indices(response_sequences, step_split_token_id)
+            self.logger.info("End of Step Indices:")
+            self.logger.info(eostep_indices)
+            self.logger.info("Reward of Current Experience:")
+            self.logger.info(reward)
+            assert len(eostep_indices) == len(reward)
+            for i in range(len(eostep_indices)):
+                assert len(eostep_indices[i]) == len(reward[i]) or len(eostep_indices[i]) == (len(reward[i]) + 1)
+                if len(eostep_indices[i]) == (len(reward[i]) + 1):
+                    assert eostep_indices[i][-1] ==  (eostep_indices[i][-2] + 1)
+                    eostep_indices[i].pop(-1)
+            reward = compute_reward_new(
                 reward,
+                eostep_indices,
                 self.kl_ctl.value,
                 experience.kl,
-                action_mask=experience.action_mask,
-                num_actions=num_actions,
+                experience.action_mask,
                 reward_clip_range=args.reward_clip_range,
             )
 
@@ -276,6 +303,7 @@ class NaiveExperienceMaker(ABC):
             experience.kl = None
             del experience.info["num_actions"]
             experience.to_device("cpu")
+            idx += 1
         return experiences
     
     def is_valid(self, solution: str):
@@ -412,11 +440,45 @@ class NaiveExperienceMaker(ABC):
 
         return sequences, attention_mask, action_mask, problem, previous_steps, step, ref_solution, final_value
 
+    def get_problem_and_solution_qwen(self, text: str):
+        special_token_content = {
+            "im_start": "<|im_start|>",
+            "im_end": "<|im_end|>",
+            "text_start": "<|beginoftext|>",
+            "text_end": "<|endoftext|>"
+        }
+        tmp = text.split(special_token_content["im_start"]+"user")[-1]
+        problem = tmp.split(special_token_content["im_end"])[0].strip()
+        sol_start_content = special_token_content["im_start"] + "assistant"
+        sol_end_content = special_token_content["im_end"]
+        sol_start_idx = tmp.find(sol_start_content) + len(sol_start_content)
+        sol_end_idx = tmp.find(sol_end_content, sol_start_idx + len(sol_start_content))
+        solution = tmp[sol_start_idx: sol_end_idx].strip()
+
+        return problem, solution
+
+    def get_problem_and_solution_llama(self, text: str):
+        header_start = "<|start_header_id|>"
+        header_end = "<|end_header_id|>"
+        text_start = "<|begin_of_text|>"
+        text_end = "<|end_of_text|>"
+        round_end = "<|eot_id|>"
+
+        user_split = header_start + "user" + header_end
+        assistant_split = header_start + "assistant" + header_end
+        tmp = text.split(user_split)[-1]
+        problem = tmp[:tmp.find(round_end)].strip()
+        tmp = text.split(assistant_split)[-1]
+        solution = tmp[:tmp.find(text_end)].strip()
+
+        return problem, solution
+
     @torch.no_grad()
     def generate_samples(self, all_prompts: List[List[str]], **generate_kwargs) -> List[Samples]:
         """
         Generate samples and return in batches.
         """
+        self.logger.info("Generating 'Samples'......")
         assert not getattr(self, "packing_samples", False)
         args = self.strategy.args
         self.actor.eval()
@@ -425,37 +487,38 @@ class NaiveExperienceMaker(ABC):
         all_ref_solutions = sum([[ref_sol] * args.n_samples_per_prompt for ref_sol in all_prompts[1]], [])
         samples_list = []
         for i in range(0, len(all_problems), args.micro_rollout_batch_size):
+            self.logger.info(f"Micro rollout batch {i / args.micro_rollout_batch_size}")
             prompts = all_problems[i : i + args.micro_rollout_batch_size]
             ref_solutions = all_ref_solutions[i : i + args.micro_rollout_batch_size]
             inputs = self.tokenize_fn(prompts, self.prompt_max_len, device=torch.cuda.current_device())
-            sequences, attention_mask, action_mask = self.actor.generate(
-                **inputs,
-                early_stopping=False,
-                num_beams=2,
-                repetition_penalty=1.0,
-                **generate_kwargs)
-            texts = self.tokenizer.batch_decode(sequences, skip_special_tokens=False)
-            if self.strategy.is_rank_0():
-                print(f"######## Actor Outputs {i} ########")
-                print(texts)
-            new_sequences, new_attention_mask, new_action_mask, problem, previous_steps, step, ref_solution, final_value = self.expand_sequences(
-                sequences, texts, attention_mask, action_mask, ref_solutions
-            )
-            new_texts = self.tokenizer.batch_decode(new_sequences, skip_special_tokens=False)
-            if new_sequences.size(0) > 0:
+
+            while True:
+                sequences, attention_mask, action_mask = self.actor.generate(**inputs, **generate_kwargs)
+                
+                texts = self.tokenizer.batch_decode(sequences, skip_special_tokens=False)
+                
+                tmp = [self.get_problem_and_solution_llama(text) for text in texts]
+                problems = [x[0] for x in tmp]
+                solutions = [x[1] for x in tmp]
+                all_valid = all([solution_end_is_valid(solution) for solution in solutions])
+
+                if all_valid:
+                    break
+                else:
+                    self.logger.info(f"Problems are {problems}")
+                    self.logger.info(f"Solutions are {solutions}")
+                    self.logger.info("There are invalid solutions, regenerating......")
+
+            if sequences.size(0) > 0:
                 samples = Samples(
-                    sequences=new_sequences,
-                    attention_mask=new_attention_mask,
-                    action_mask=new_action_mask,
-                    num_actions=new_action_mask.size(1),
+                    sequences=sequences,
+                    attention_mask=attention_mask,
+                    action_mask=action_mask,
+                    num_actions=action_mask.size(1),
                     packed_seq_lens=None,
-                    response_length=new_action_mask.float().sum(dim=-1),
-                    total_length=new_attention_mask.float().sum(dim=-1),
-                    problem_list=problem,
-                    previous_steps_list=previous_steps,
-                    step_list=step,
-                    ref_solution_list=ref_solution,
-                    final_value_list=final_value
+                    response_length=action_mask.float().sum(dim=-1),
+                    total_length=attention_mask.float().sum(dim=-1),
+                    ref_solutions=ref_solutions
                 )
                 samples_list.append(samples)
 
@@ -464,40 +527,74 @@ class NaiveExperienceMaker(ABC):
     def preprocess_data(self, problem, ref_solution, previous_steps, step) -> str:
 
         # Add No. to previous_steps and step
+        num_previous_steps = len(previous_steps)
         previous_steps = [f"{idx+1}. " + step for idx, step in enumerate(previous_steps)]
         previous_steps = '\n'.join(previous_steps)
-        step = f"{len(previous_steps) + 1}. " + step
+        step = f"{num_previous_steps + 1}. " + step
         data = f"Problem:\n{problem}\n\nReference Solution:\n{ref_solution}\n\nPrevious Steps:\n{previous_steps}\n\nStep to Evaluate:\n{step}"
 
-        with open(self.verification_system_message_file, 'r') as f1, open(self.verification_few_shot_file, 'r') as f2:
-            system_message = f1.read()
-            few_shot_examples = json.load(f2)
+        with open(self.verification_system_message_file, 'r') as f:
+            system_message = f.read()
 
         messages = [{"role": "system", "content": system_message}]
-        # for example in few_shot_examples[:1]:
-        #     messages.append({"role": "user", "content": example["input"]})
-        #     messages.append({"role": "assistant", "content": example["output"]})
         messages.append({"role": "user", "content": data})
         prompt = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
 
         return prompt
-    
-    def postprocess_samples(self, samples: Samples):
-        problem_list = samples.problem_list
-        ref_solution_list = samples.ref_solution_list
-        previous_steps_list = samples.previous_steps_list
-        step_list = samples.step_list
-        final_value_list = samples.final_value_list
 
-        prompts = [self.preprocess_data(a, b, c, d) for a, b, c, d in zip(problem_list, ref_solution_list, previous_steps_list, step_list)]
+    def verify(self, samples: Samples):
+        self.logger.info("Verify solutions by step with reward model......")
+        texts = self.tokenizer.batch_decode(samples.sequences, skip_special_tokens=False)
+        problems = []
+        solutions = []
+        ref_solutions = samples.ref_solutions
+        final_values = []
+        ref_values = []
+        for text in texts:
+            problem, solution = self.get_problem_and_solution_llama(text)
+            problems.append(problem)
+            solutions.append(solution)
+            final_values.append(get_final_value_from_solution(solution))
+        
+        for ref_solution in ref_solutions:
+            ref_values.append(get_final_value_from_solution(ref_solution))
 
-        micro_prompt_lists = []
-        for i in range(0, len(prompts), 2):
-            micro_prompt_lists.append(prompts[i:i + 2])
+        solution_labels = [True if final_values[i] == ref_values[i] else False for i in range(len(final_values))]
+
+        self.logger.info("Problems>>>>>>")
+        self.logger.info(problems)
+        self.logger.info("Solutions>>>>>>")
+        self.logger.info(solutions)
+        self.logger.info("Reference solutions>>>>>>")
+        self.logger.info(ref_solutions)
+        self.logger.info("Solution labels>>>>>>")
+        self.logger.info(solution_labels)
+
+        # Get steps for solutions
+        step_list = []
+        for solution in solutions:
+            step_list.append(get_steps(solution))
+        
+        self.logger.info("Steps of each solution>>>>>>")
+        for idx, steps in enumerate(step_list):
+            self.logger.info(f"Steps for solution {idx}")
+            self.logger.info(steps)
+        
+        prompts = []
+        for idx, problem in enumerate(problems):
+            for idy, step in enumerate(step_list[idx]):
+                prompts.append(self.preprocess_data(problem, ref_solutions[idx], step_list[idx][:idy], step))
+        
+        assert self.strategy is not None
+        micro_prompt_list = []
+        batch_size = self.strategy.args.reward_model_generate_batch_size
+        prompt_max_len = self.strategy.args.rm_prompt_max_len
+        for i in range(0, len(prompts), batch_size):
+            micro_prompt_list.append(prompts[i : i + batch_size])
         
         outputs = []
-        for micro_promts in micro_prompt_lists:
-            micro_inputs = self.tokenize_fn(micro_promts, 4096, device=torch.cuda.current_device())
+        for micro_promts in micro_prompt_list:
+            micro_inputs = self.tokenize_fn(micro_promts, prompt_max_len, device=torch.cuda.current_device())
             micro_outputs = self.reward_model.model.generate(
                 **micro_inputs,
                 use_cache=True,
@@ -514,100 +611,43 @@ class NaiveExperienceMaker(ABC):
             input_length = micro_inputs["input_ids"].shape[1]
             micro_outputs = self.tokenizer.batch_decode(micro_outputs[:, input_length:], skip_special_tokens=True)
             outputs.extend(micro_outputs)
-
+        
         r = [False if "Evaluation Result: INCORRECT" in output else True for output in outputs]
+        num_step = [len(steps) for steps in step_list]
 
-        if self.strategy.is_rank_0():
-            for i in range(len(problem_list)):
-                print("#### ", i)
-                print("Problem: ", problem_list[i])
-                print("Ref Solv: ", ref_solution_list[i])
-                print("Previous Steps: ", previous_steps_list[i])
-                print("Step to Eval: ", step_list[i])
-                print("Final Value: ", final_value_list[i])
-                print("Eval: ", outputs[i])
+        assert sum(num_step) == len(r)
+        assert sum(num_step) == len(outputs)
 
-        # count the number of steps for each problem
-        count_dict = {}
-        for problem in problem_list:
-            if problem not in count_dict:
-                count_dict[problem] = 1
-            else:
-                count_dict[problem] += 1
-        step_nums = [v for _, v in count_dict.items()]
+        outputs = group_elements(outputs, num_step)
+        r = group_elements(r, num_step)
 
-        # select items in the 8 lists above according to problem steps (to the first incorrect step for each problem)
-        selected_items = []
-        for problem_idx, step_num in enumerate(step_nums):
-            start_item_idx = sum(step_nums[:problem_idx])
-            solution_value = final_value_list[start_item_idx]
-            ref_solution_value = float(ref_solution_list[start_item_idx].split("####")[-1].strip().replace(',', ''))
-            is_correct_solution = solution_value == ref_solution_value
-            verification_result = all(r[start_item_idx:start_item_idx + step_num])
-            if is_correct_solution != verification_result:
-                continue
-            
-            for i in range(start_item_idx, start_item_idx + step_num):
-                selected_items.append(i)
-                if r[i] == False:
-                    break
-        
-        if self.strategy.is_rank_0():
-            print("Selected Items: ", selected_items)
+        self.logger.info("Verification result for all solutions>>>>>>")
+        for idx, output in enumerate(outputs):
+            self.logger.info(f"Verification result for solution {idx}>>>>>>")
+            for idy, data in enumerate(output):
+                self.logger.info(f"Step {idy}>>>>>>")
+                self.logger.info(data)
 
-        r = [1.0 if r[x] else -1.0 for x in selected_items]
-        r = torch.tensor(r, dtype=torch.float64).to(device=torch.cuda.current_device())
+        for reward in r:
+            if False in reward:
+                index = reward.index(False)
+                reward[index + 1:] = [False] * (len(reward) - index - 1)
+        
+        self.logger.info("Verification result accumulation>>>>>>")
+        self.logger.info(r)
+        
+        picked_items = []
+        for i in range(len(solution_labels)):
+            if solution_labels[i] == all(r[i]):
+                picked_items.append(i)
+        
+        self.logger.info("Picked items>>>>>>")
+        self.logger.info(picked_items)
 
-        return r, samples.subset(selected_items)
+        if picked_items == []:
+            picked_items = [0]
 
-    def process_in_batches(self, model, sequences, num_actions, attention_mask, batch_size=4):
-        """
-        Process sequences in smaller batches to avoid CUDA OOM errors.
-        
-        Args:
-            sequences: Input tensor of shape (n * m)
-            num_actions: int
-            attention_mask: Input tensor of shape (n * m)
-            batch_size: Number of sequences to process at once
-            
-        Returns:
-            Concatenated results from all batches
-        """
-        # Get total number of sequences
-        total_sequences = sequences.size(0)
-        
-        # Calculate number of batches needed
-        num_batches = (total_sequences + batch_size - 1) // batch_size
-        
-        # List to store results from each batch
-        all_results = []
-        
-        for i in range(num_batches):
-            # Calculate start and end indices for current batch
-            start_idx = i * batch_size
-            end_idx = min((i + 1) * batch_size, total_sequences)
-            
-            # Get current batch of data
-            batch_sequences = sequences[start_idx:end_idx]
-            batch_attention_mask = attention_mask[start_idx:end_idx]
-            
-            # Process current batch
-            
-            batch_result = model(
-                batch_sequences,
-                num_actions,
-                batch_attention_mask
-            )
-            
-            # Store batch result
-            all_results.append(batch_result)
-            
-            # Optional: Clear CUDA cache after each batch
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-        
-        # Concatenate all batch results
-        return torch.cat(all_results, dim=0)
+        return r, picked_items
 
     @torch.no_grad()
     def make_experience(self, samples: Samples) -> Experience|None:
@@ -621,10 +661,14 @@ class NaiveExperienceMaker(ABC):
         if self.critic is not None:
             self.critic.eval()
 
-        r, samples = self.postprocess_samples(samples)
+        verification_result, picked_items = self.verify(samples)
+        verification_result = [verification_result[i] for i in picked_items]
+        assert self.strategy is not None
+        r = [[self.strategy.args.correct_step_reward if x else self.strategy.args.incorrect_step_reward for x in res] for res in verification_result]
+        
+        samples = samples.subset(picked_items)
 
-        if r.size(0) == 0:
-            return None
+        assert len(verification_result) == samples.sequences.shape[0]
 
         # extract values from samples
         sequences = samples.sequences
@@ -674,9 +718,12 @@ class NaiveExperienceMaker(ABC):
             info,
             kl,
         )
-
+    
+    def find_solution_end_index(self, solution: str):
+        return solution.find("<|im_end|>") - 1
+    
     @torch.no_grad()
-    def process_experiences(self, experiences: List[Experience]) -> Tuple[List[Experience], List[torch.Tensor]]:
+    def process_experiences(self, experiences: List[Experience]) -> Tuple[List[Experience], List[List[List[float]]]]:
         """
         Process experiences, this can be used to filter out some experiences or do some processing on the rewards.
 

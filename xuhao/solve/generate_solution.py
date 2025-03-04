@@ -15,8 +15,14 @@ from torch.utils.data import Dataset
 
 from xuhao.utils import blending_datasets
 
+<<<<<<< HEAD
 solution_system_message_file = "xuhao/solve/data/input/solution_system_message.txt"
 solution_few_shot_file = "xuhao/solve/data/input/solution_few_shot.json"
+=======
+home_dir = "/root"
+solution_system_message_file = f"{home_dir}/OpenRLHF/xuhao/solve/data/input/solution_system_message.txt"
+solution_few_shot_file = f"{home_dir}/OpenRLHF/xuhao/sft_am/data/input/few_shot.json"
+>>>>>>> ppo
 
 def preprocess_data(data, input_key, apply_chat_template) -> str:
     with open(solution_system_message_file, 'r') as f1, open(solution_few_shot_file, 'r') as f2:
@@ -157,7 +163,8 @@ def batch_generate(args):
                 eos_token_id=tokenizer.eos_token_id,
             )
             input_length = inputs["input_ids"].shape[1]
-            outputs = tokenizer.batch_decode(outputs, skip_special_tokens=False)
+            outputs = tokenizer.batch_decode(outputs[:, input_length:], skip_special_tokens=False)
+
             for i, output in enumerate(outputs):
                 # 保存索引和输出的对应关系
                 indexed_outputs.append((batch_indices[i], output))

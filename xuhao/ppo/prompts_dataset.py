@@ -3,8 +3,8 @@ from torch.utils.data import Dataset
 from tqdm import tqdm
 
 home_dir = "/root"
-solution_system_message_file = f"{home_dir}/OpenRLHF/xuhao/sft_am/data/input/system_message.txt"
-solution_few_shot_file = f"{home_dir}/OpenRLHF/xuhao/sft_am/data/input/few_shot.json"
+solution_system_message_file = "./xuhao/sft_am/data/input/system_message.txt"
+solution_few_shot_file = "./xuhao/sft_am/data/input/few_shot.json"
 
 def preprocess_data(data, input_key, apply_chat_template) -> tuple:
     with open(solution_system_message_file, 'r') as f1, open(solution_few_shot_file, 'r') as f2:
@@ -14,9 +14,9 @@ def preprocess_data(data, input_key, apply_chat_template) -> tuple:
     problem = data[input_key]
     ref_solution = data["answer"]
     messages = [{"role": "system", "content": system_message}]
-    # for example in few_shot_examples:
-    #     messages.append({"role": "user", "content": example["problem"]})
-    #     messages.append({"role": "assistant", "content": example["solution"]})
+    for example in few_shot_examples:
+        messages.append({"role": "user", "content": example["problem"]})
+        messages.append({"role": "assistant", "content": example["solution"]})
     messages.append({"role": "user", "content": problem})
     problem_prompt = apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
 

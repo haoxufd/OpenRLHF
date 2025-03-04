@@ -16,13 +16,15 @@ from xuhao.utils import blending_datasets
 from xuhao.ppo.prompts_dataset import PromptDataset
 from xuhao.ppo.prompts_dataset_eval import PromptDatasetEval
 
-
+from openrlhf.utils.logging_utils import init_file_logger
+import torch.distributed as dist
 
 def train(args):
-    os.environ['NCCL_TIMEOUT'] = '1200'
     # configure strategy
     strategy = get_strategy(args)
     strategy.setup_distributed()
+
+    logger = init_file_logger(__name__, f"{args.log_path}/log_{dist.get_rank()}.txt")
 
     # configure model
     # load huggingface model
@@ -127,14 +129,14 @@ def train(args):
         args.prompt_data_probs,
         strategy,
         args.seed,
-        max_count=args.max_samples,
+        max_count=args.max_train_samples,
         return_eval=True,
         train_split=args.prompt_split,
     )
-    prompts_data = prompts_data.select(range(min(args.max_samples, len(prompts_data))))
+    prompts_data = prompts_data.select(range(min(args.max_train_samples, len(prompts_data))))
     prompts_dataset = PromptDataset(prompts_data, tokenizer, strategy, input_template=args.input_template)
 
-    eval_data = eval_data.select(range(min(args.max_samples, len(eval_data))))
+    eval_data = eval_data.select(range(min(args.max_test_samples, len(eval_data))))
     eval_dataset = PromptDatasetEval(eval_data, tokenizer, strategy)
 
     if args.pretrain_data:
@@ -177,7 +179,7 @@ def train(args):
         pretrain_dataloader = None
 
     eval_dataloader = strategy.setup_dataloader(
-        eval_dataset, args.micro_train_batch_size, True, False, drop_last=False
+        eval_dataset, args.micro_rollout_batch_size, True, False, drop_last=False
     )
 
     # configure scheduler
@@ -273,6 +275,7 @@ def train(args):
         eos_token_id=tokenizer.eos_token_id,
         # remote reward model
         remote_rm_url=args.remote_rm_url,
+        logger=logger
     )
 
     trainer.fit(args, prompts_dataloader, pretrain_dataloader, eval_dataloader, consumed_samples, num_update_steps_per_episodes)
@@ -293,29 +296,46 @@ def train(args):
 
 
 if __name__ == "__main__":
+    debug = False
     save_value_network = True
-    qwen = "/mnt/data/models/pretrain_models/Qwen2.5-1.5B-Instruct"
-    llama_actor = "/mnt/data/user/zhao_jun/xuhao/actor-llama-3.1-8b-sft-gsm8k"
-    llama_reward = "/mnt/data/user/zhao_jun/xuhao/reward-llama-3.1-8b-sft-gsm8k"
+    qwen = "/home/user/models/Qwen2.5-1.5B-Instruct"
+    llama = "/root/data/models/Meta-Llama-3.1-8B-Instruct"
+    llama_actor = "/root/data/models/actor-llama-3.1-8b-sft-gsm8k-st"
+    llama_reward = "/root/data/models/reward-llama-3.1-8b-sft-gsm8k"
     pretrain = llama_actor
     reward_pretrain = llama_reward
-    critic_pretrain = "/mnt/data/models/pretrain_models/Meta-Llama-3.1/Meta-Llama-3.1-8B-Instruct"
+    critic_pretrain = llama
     prompt_data = "openai/gsm8k"
-    micro_train_batch_size = 2
-    train_batch_size = micro_train_batch_size * torch.cuda.device_count()
-    micro_rollout_batch_size = 2
-    rollout_batch_size = micro_rollout_batch_size * torch.cuda.device_count() * 2
 
-    eval_steps = 600
-    save_steps = 60
+    micro_train_batch_size = 4
+    train_batch_size = 16
+    micro_rollout_batch_size = 4
+    rollout_batch_size = 64
+    reward_model_generate_batch_size = 4
+    max_train_samples = 100000
+    max_test_samples = 100
+    eval_steps = 10
+    save_steps = 90
 
     gradient_checkpointing = True
     bf16 = True
+    prompt_max_len = 1024
     generate_max_len = 512
+    rm_prompt_max_len = 2048
 
-    load_checkpoint = True
-    save_path = "/mnt/data/user/zhao_jun/xuhao/ckpt-ppo-2"
-    ckpt_path = "/mnt/data/user/zhao_jun/xuhao/ckpt-ppo-2/checkpoints_ppo"
+    correct_step_reward = 1.0
+    incorrect_step_reward = 0
+
+    load_checkpoint = False
+    save_path = "/root/data/ppo/ckpt_1"
+    ckpt_path = "/root/data/ppo/ckpt_1/checkpoints_ppo"
+    log_path = "/root/data/ppo/log_1"
+    eval_output_path = "/root/data/ppo/eval_output_1"
+
+    num_episodes = 10
+    max_epochs = 1
+
+    step_split_str = "<|reserved_special_token_0|>"
 
     parser = argparse.ArgumentParser()
     # Checkpoint
@@ -324,19 +344,25 @@ if __name__ == "__main__":
     parser.add_argument("--logging_steps", type=int, default=1)
     parser.add_argument("--eval_steps", type=int, default=eval_steps)
     parser.add_argument("--ckpt_path", type=str, default=ckpt_path)
+    parser.add_argument("--log_path", type=str, default=log_path)
+    parser.add_argument("--eval_output_path", type=str, default=eval_output_path)
     parser.add_argument("--max_ckpt_num", type=int, default=3)
     parser.add_argument("--max_ckpt_mem", type=int, default=1e8)
     parser.add_argument("--load_checkpoint", action="store_true", default=load_checkpoint)
 
     # PPO
-    parser.add_argument("--num_episodes", type=int, default=2)
+    parser.add_argument("--step_split_str", type=str, default=step_split_str)
+    parser.add_argument("--num_episodes", type=int, default=num_episodes)
     parser.add_argument("--rollout_batch_size", type=int, default=rollout_batch_size)
     parser.add_argument("--micro_rollout_batch_size", type=int, default=micro_rollout_batch_size)
-    parser.add_argument("--max_epochs", type=int, default=1)
-    parser.add_argument("--prompt_max_len", type=int, default=1024, help="Max tokens for each prompt")
+    parser.add_argument("--reward_model_generate_batch_size", type=int, default=reward_model_generate_batch_size)
+    parser.add_argument("--max_epochs", type=int, default=max_epochs)
+    parser.add_argument("--prompt_max_len", type=int, default=prompt_max_len, help="Max tokens for each prompt")
     parser.add_argument("--generate_max_len", type=int, default=generate_max_len, help="Max tokens to generate in PPO")
+    parser.add_argument("--rm_prompt_max_len", type=int, default=rm_prompt_max_len)
     parser.add_argument("--max_len", type=int, default=None, help="deprecated max_len")
-    parser.add_argument("--max_samples", type=int, default=1000000)
+    parser.add_argument("--max_train_samples", type=int, default=max_train_samples)
+    parser.add_argument("--max_test_samples", type=int, default=max_test_samples)
     parser.add_argument("--max_norm", type=float, default=1.0, help="Gradient clipping")
     parser.add_argument("--l2", type=float, default=0.0, help="weight decay loss")
     parser.add_argument("--ptx_coef", type=float, default=0.05, help="PPO-ptx loss coef")
@@ -370,6 +396,8 @@ if __name__ == "__main__":
     )
     parser.add_argument("--adam_betas", type=float, nargs=2, default=(0.9, 0.95), help="Betas for Adam optimizer")
     parser.add_argument("--reward_clip_range", type=float, nargs=2, default=(-10, 10), help="Reward clip range")
+    parser.add_argument("--correct_step_reward", type=float, default=correct_step_reward)
+    parser.add_argument("--incorrect_step_reward", type=float, default=incorrect_step_reward)
 
     # DeepSpeed
     parser.add_argument("--seed", type=int, default=42)
@@ -435,7 +463,7 @@ if __name__ == "__main__":
     )
 
     # wandb parameters
-    parser.add_argument("--use_wandb", type=str, default=True)
+    parser.add_argument("--use_wandb", type=str, default=None)
     parser.add_argument("--wandb_org", type=str, default=None)
     parser.add_argument("--wandb_group", type=str, default=None)
     parser.add_argument("--wandb_project", type=str, default="openrlhf_train_ppo")

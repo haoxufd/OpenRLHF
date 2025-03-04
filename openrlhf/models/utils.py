@@ -1,7 +1,67 @@
 from typing import Optional, Tuple, Union
-
 import torch
 import torch.nn.functional as F
+
+def compute_reward_new(
+    r: list[list[float]],
+    eostep_indices: list[list[int]],
+    kl_coef: float,
+    kl: Union[torch.Tensor, list[torch.Tensor]],
+    action_mask: Optional[torch.Tensor],
+    reward_clip_range: Tuple[float, float]
+) -> torch.Tensor:
+    """
+    Modified reward computation function that handles variable-length rewards and custom indices.
+    
+    Args:
+        r: List of lists containing reward values for each sequence
+        kl_coef: KL divergence coefficient
+        kl: KL divergence values as Tensor or list of Tensors
+        action_mask: Optional mask for actions
+        num_actions: Optional number of actions
+        reward_clip_range: Optional range for reward clipping
+        eostep_indices: List of lists containing indices where rewards should be assigned
+    
+    Returns:
+        Tensor or list of Tensors containing computed rewards
+    """
+    if kl_coef <= 0.0:
+        kl_coef = 0.0
+
+    # Convert rewards to tensor and apply clipping if needed
+    batch_size = len(r)
+    
+    eos_indices = action_mask.size(1) - 1 - action_mask.long().fliplr().argmax(dim=1, keepdim=True)
+    eos_indices = eos_indices.tolist()
+    assert len(eos_indices) == len(eostep_indices)
+    for i in range(len(eos_indices)):
+        eostep_indices[i][-1] = eos_indices[i][0]
+    kl_reward = -kl_coef * kl
+    # Initialize reward tensor
+    last_reward = torch.zeros_like(kl, dtype=kl.dtype)
+    
+    # Distribute rewards to specified indices
+    for i in range(batch_size):
+        curr_r = torch.tensor(r[i], device=kl.device, dtype=kl.dtype)
+        curr_r = curr_r.clamp(min=reward_clip_range[0], max=reward_clip_range[1])
+        
+        # Convert indices to tensor
+        curr_indices = torch.tensor(eostep_indices[i], device=kl.device, dtype=torch.long)
+        
+        # Create index tensor for scatter operation
+        batch_idx = torch.full_like(curr_indices, i)
+        indices_2d = torch.stack([batch_idx, curr_indices], dim=0)
+        
+        # Distribute rewards
+        last_reward.index_put_(
+            (indices_2d[0], indices_2d[1]),
+            curr_r,
+            accumulate=True
+        )
+        
+    reward = last_reward + kl_reward
+    
+    return reward
 
 
 def compute_approx_kl(

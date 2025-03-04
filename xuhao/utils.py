@@ -1,5 +1,6 @@
 import json
 from itertools import groupby
+from unittest import result
 from datasets import interleave_datasets, load_dataset
 import re
 
@@ -143,6 +144,113 @@ def get_solve_result(solutions: list, ref_solutions: list):
             incorrect_indices.append(i)
         else:
             num_correct += 1
-    total = num_correct + num_incorrect
-    acc = num_correct / total
-    return [num_correct, num_incorrect, total, acc, incorrect_indices]
+
+    return [num_correct, num_incorrect]
+
+def get_steps(solution: str):
+    """
+    """
+    steps = solution.strip().split('<|reserved_special_token_0|>')
+    result = []
+    for step in steps:
+        if step.strip() and step.strip() != "<|eot_id|>":
+            result.append(step.strip())
+    result[-1] = result[-1].split("####")[0].strip() if "####" in result[-1] else result[-1]
+
+    return result
+
+def get_final_value_from_solution(solution: str) -> float | None:
+    content = solution.split("####")[-1] if "####" in solution else solution.split('\n')[-1]
+    content = content.strip()
+    numbers = find_numbers(content)
+    return None if not numbers else numbers[0]
+
+def find_newline_indices(s):
+    indices = []
+    for i, char in enumerate(s):
+        if char == '\n':
+            # 如果是第一个 '\n' 或与前一个字符不连续
+            if i == 0 or s[i - 1] != '\n':
+                indices.append(i)
+    return indices
+
+def find_numbers(text: str):
+    pattern = r'-?(?:\d*\.?\d+|\.\d+)(?:,\d{3})*'
+    res = re.findall(pattern, text)
+    # TODO: 识别分数, 如 1/4
+    res = [float(x.replace(',', '')) for x in res]
+    return res
+
+def group_elements(elements, group_sizes):
+    """
+    将列表 elements 中的元素按照 group_sizes 中指定的分组大小分组.
+
+    参数:
+        elements (list): 待分组的元素列表, 其长度必须等于 sum(group_sizes).
+        group_sizes (list of int): 每组需要的元素个数列表, 总和应与 elements 的长度相等.
+
+    返回:
+        list of list: 分组后的列表, 每个子列表的长度对应 group_sizes 中的值.
+
+    示例:
+        >>> elements = [1, 2, 3, 4, 5, 6]
+        >>> group_sizes = [2, 1, 3]
+        >>> group_elements(elements, group_sizes)
+        [[1, 2], [3], [4, 5, 6]]
+    """
+    if len(elements) != sum(group_sizes):
+        raise ValueError("元素总数必须等于 group_sizes 中数字的和.")
+    
+    result = []
+    start_index = 0
+    for size in group_sizes:
+        # 切片得到当前组
+        group = elements[start_index : start_index + size]
+        result.append(group)
+        start_index += size
+
+    return result
+
+def solution_end_is_valid(solution: str):
+    return solution.endswith('<|reserved_special_token_0|><|eot_id|>') or solution.endswith('<|reserved_special_token_0|><|reserved_special_token_0|>')
+
+def get_eostep_indices(response_sequences: list[list[int]], step_split_token_id: int)->list[list[int]]:
+    """
+    获取每个响应序列中步骤分割符的索引.
+
+    本函数旨在找出在每个响应序列中, 每个步骤结束（由特定的分割符标识）的位置索引.
+    这对于处理分步骤的响应数据特别有用, 比如在分析对话系统中每个回复包含的步骤时.
+
+    参数:
+    response_sequences (list[list[int]]): 一个二维列表, 包含多个响应序列, 每个响应序列是由整数表示的token id序列.
+    step_split_token_id (int): 用于标识每个步骤结束的特定token id.
+
+    返回:
+    list[list[int]]: 一个二维列表, 每个子列表包含对应响应序列中每个步骤结束的token id索引.
+    """
+    # 初始化用于存储所有响应序列中步骤分割符索引的列表
+    eostep_indices = []
+
+    # 遍历每个响应序列
+    for response in response_sequences:
+        # 初始化用于存储当前响应序列中步骤分割符索引的列表
+        indices = []
+        # 从响应序列的起始位置开始查找
+        start = 0
+        # 当前查找位置未超出响应序列长度时, 继续查找
+        while start < len(response):
+            try:
+                # 查找 step_split_token_id 在 response 中的位置
+                idx = response.index(step_split_token_id, start)
+                # 将找到的位置索引添加到列表中
+                indices.append(idx)
+                # 更新下一次查找的起始位置
+                start = idx + 1
+            except ValueError:
+                # 如果未找到 step_split_token_id, 则退出循环
+                break
+        # 将当前响应序列中所有步骤分割符的索引添加到结果列表中
+        eostep_indices.append(indices)
+
+    # 返回所有响应序列中步骤分割符的索引列表
+    return eostep_indices

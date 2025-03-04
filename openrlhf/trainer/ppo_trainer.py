@@ -87,6 +87,7 @@ class PPOTrainer(ABC):
         dataloader_pin_memory: bool = True,
         remote_rm_url: str = None,
         reward_fn: Callable[[List[torch.Tensor]], torch.Tensor] = None,
+        logger=None,
         **generate_kwargs,
     ) -> None:
         assert (
@@ -94,6 +95,7 @@ class PPOTrainer(ABC):
         ), "reward_fn must be specified if using multiple reward models"
 
         super().__init__()
+        self.logger = logger
         self.strategy = strategy
         self.args = strategy.args
         self.micro_rollout_batch_size = micro_rollout_batch_size
@@ -146,6 +148,7 @@ class PPOTrainer(ABC):
             strategy,
             remote_rm_url,
             reward_fn,
+            self.logger
         )
         packing_samples = getattr(self.args, "packing_samples", False)
         self.replay_buffer = NaiveReplayBuffer(
@@ -216,44 +219,34 @@ class PPOTrainer(ABC):
         consumed_samples = consumed_samples % (num_rollouts_per_episodes * args.rollout_batch_size)
 
         for episode in range(start_episode, args.num_episodes):
+            self.logger.info(f"Episode {episode}")
             if isinstance(self.prompts_dataloader.sampler, DistributedSampler):
                 self.prompts_dataloader.sampler.set_epoch(
                     episode, consumed_samples=0 if episode > start_episode else consumed_samples
                 )
             pbar = tqdm(
                 range(self.prompts_dataloader.__len__()),
-                desc=f"Episode [{episode + 1}/{args.num_episodes}]",
+                desc=f"Episode [{episode}/{args.num_episodes}]",
                 disable=not self.strategy.is_rank_0(),
             )
 
+            self.logger.info("Rollout......")
             for rand_prompts in self.prompts_dataloader:
-                torch.distributed.barrier()
+                self.logger.info(f"Step {steps}")
                 exp_list = self.experience_maker.make_experience_list(rand_prompts, **self.generate_kwargs)
                 
-                for i, experience in enumerate(exp_list):
-                    if i == 0:
-                        output = self.tokenizer.batch_decode(
-                            experience.sequences[0].unsqueeze(0), skip_special_tokens=False
-                        )
-                        self.strategy.print(output)
+                for experience in exp_list:
                     self.replay_buffer.append(experience)
 
-                # 1. 首先同步所有进程的数据量
+                # 首先同步所有进程的数据量
                 local_size = len(self.replay_buffer)
                 size_tensor = torch.LongTensor([local_size]).cuda()
                 torch.distributed.all_reduce(size_tensor, op=torch.distributed.ReduceOp.MIN)
                 min_size = int(size_tensor.item())
             
-                # 2. 所有进程都使用相同的最小数据量
+                # 所有进程都使用相同的最小数据量
                 if local_size > min_size:
                     self.replay_buffer.items = self.replay_buffer.items[:min_size]
-                
-                if len(self.replay_buffer) == 0:
-                    client_states = {"consumed_samples": steps * args.rollout_batch_size}
-                    self.save_logs_and_checkpoints(args, steps, pbar, client_states=client_states)
-                    pbar.update()
-                    steps = steps + 1
-                    continue
 
                 torch.cuda.empty_cache()
                 self.replay_buffer.normalize("advantages", self.strategy)
@@ -265,6 +258,8 @@ class PPOTrainer(ABC):
                     self.kl_ctl.update(status["kl"], args.rollout_batch_size * args.n_samples_per_prompt)
             
                 pbar.set_postfix(status)
+                self.logger.info(f"Status of step {steps}")
+                self.logger.info(status)
                 # logs/checkpoints
                 client_states = {"consumed_samples": steps * args.rollout_batch_size}
                 self.save_logs_and_checkpoints(args, steps, pbar, status, client_states)
@@ -278,8 +273,6 @@ class PPOTrainer(ABC):
             self._tensorboard.close()
 
     def ppo_train(self, global_steps=0):
-        torch.distributed.barrier()
-
         # replay buffer may be empty at first, we should rebuild at each training
         dataloader = DataLoader(
             self.replay_buffer,
@@ -294,7 +287,6 @@ class PPOTrainer(ABC):
         status_list = []
         status_mean = {}
         for epoch in range(self.max_epochs):
-            torch.distributed.barrier()
             pbar = tqdm(
                 dataloader,
                 desc=f"Train epoch [{epoch + 1}/{self.max_epochs}]",
@@ -334,7 +326,6 @@ class PPOTrainer(ABC):
                 status_list.append(status)
                 pbar.set_postfix(short_status)
 
-        torch.distributed.barrier()
         if status_list:
             status_mean = status_list[0]
             for m in status_list[1:]:
@@ -424,7 +415,13 @@ class PPOTrainer(ABC):
             attention_mask = experience.attention_mask
 
         # actor loss
-        action_log_probs = self.process_in_batches(self.actor, sequences, num_actions, attention_mask, packed_seq_lens)
+        action_log_probs, output = self.actor(
+            sequences,
+            num_actions,
+            attention_mask=attention_mask,
+            return_output=True,
+            packed_seq_lens=packed_seq_lens,
+        )
 
         # loss function
         actor_loss = self.actor_loss_fn(
@@ -434,11 +431,10 @@ class PPOTrainer(ABC):
             action_mask=experience.action_mask,
         )
         # mixtral
-        # if self.aux_loss:
-        #     # aux_loss = output.aux_loss
-        # else:
-        #     aux_loss = 0
-        aux_loss = 0
+        if self.aux_loss:
+            aux_loss = output.aux_loss
+        else:
+            aux_loss = 0
         loss = actor_loss + aux_loss * self.args.aux_loss_coef
         self.strategy.backward(loss, self.actor, self.actor_optim)
 
@@ -505,12 +501,12 @@ class PPOTrainer(ABC):
             attention_mask = experience.attention_mask
 
         # critic loss
-        values = self.process_in_batches(
-            self.critic,
+        values, output = self.critic(
             sequences,
             num_actions=num_actions,
             attention_mask=attention_mask,
-            packed_seq_lens=packed_seq_lens
+            return_output=True,
+            packed_seq_lens=packed_seq_lens,
         )
         # loss function
         critic_loss = self.critic_loss_fn(
@@ -520,11 +516,10 @@ class PPOTrainer(ABC):
             action_mask=experience.action_mask,
         )
         # mixtral
-        # if self.aux_loss:
-        #     aux_loss = output.aux_loss
-        # else:
-        #     aux_loss = 0
-        aux_loss = 0
+        if self.aux_loss:
+            aux_loss = output.aux_loss
+        else:
+            aux_loss = 0
         loss = critic_loss + aux_loss * self.args.aux_loss_coef
         self.strategy.backward(loss, self.critic, self.critic_optim)
         self.strategy.optimizer_step(self.critic_optim, self.critic, self.critic_scheduler, name="critic")
@@ -554,10 +549,10 @@ class PPOTrainer(ABC):
             
             # 如果没有找到匹配的文件，返回 0
             if not step_numbers:
-                return "xuhao/ppo/data/output/eval_step_0.json"
+                return f"{directory}/eval_step_0.json"
             
             # 否则返回最大编号 + 1
-            return "xuhao/ppo/data/output/eval_step_{}.json".format(max(step_numbers)+1)
+            return "{}/eval_step_{}.json".format(directory, max(step_numbers)+1)
     
     def evaluate(self):
         """
@@ -586,14 +581,14 @@ class PPOTrainer(ABC):
 
         for batch_idx, prompts in enumerate(pbar):
             # 计算当前批次中样本的全局索引
-            start_idx = batch_idx * self.strategy.args.micro_train_batch_size * dist.get_world_size() + dist.get_rank()
+            start_idx = batch_idx * self.strategy.args.micro_rollout_batch_size * dist.get_world_size() + dist.get_rank()
             batch_indices = [start_idx + i * dist.get_world_size() for i in range(len(prompts))]
 
             inputs = tokenize_fn(prompts)
             outputs = self.actor.model.generate(
                 **inputs,
                 use_cache=False,
-                max_new_tokens=512,
+                max_new_tokens=self.args.generate_max_len,
                 do_sample=True,
                 top_p=1.0,
                 early_stopping=False,
@@ -604,13 +599,13 @@ class PPOTrainer(ABC):
                 eos_token_id=self.tokenizer.eos_token_id,
             )
             input_length = inputs["input_ids"].shape[1]
-            outputs = self.tokenizer.batch_decode(outputs[:, input_length:], skip_special_tokens=False)
+            outputs = self.tokenizer.batch_decode(outputs[:, input_length:], skip_special_tokens=True)
             for i, output in enumerate(outputs):
                 # 保存索引和输出的对应关系
                 indexed_outputs.append((batch_indices[i], output))
 
         # 将带索引的结果写入文件
-        with jsonlines.open(self.get_next_eval_gen_file() + str(self.strategy.get_rank()), mode="w") as writer:
+        with jsonlines.open(self.get_next_eval_gen_file(self.args.eval_output_path) + str(self.strategy.get_rank()), mode="w") as writer:
             writer.write_all(indexed_outputs)
 
         dist.barrier()
@@ -619,7 +614,7 @@ class PPOTrainer(ABC):
         if self.strategy.is_rank_0():
             all_outputs = []
             world_size = dist.get_world_size()
-            files = [self.get_next_eval_gen_file() + str(rank) for rank in range(world_size)]
+            files = [self.get_next_eval_gen_file(self.args.eval_output_path) + str(rank) for rank in range(world_size)]
             
             # 收集所有结果
             for file in files:
@@ -634,7 +629,7 @@ class PPOTrainer(ABC):
             # 只保存排序后的输出结果
             sorted_outputs = [output for _, output in all_outputs]
             
-            with open(self.get_next_eval_gen_file(), 'w') as f:
+            with open(self.get_next_eval_gen_file(self.args.eval_output_path), 'w') as f:
                 json.dump(sorted_outputs, f, indent=4)
 
     def save_logs_and_checkpoints(self, args, global_step, step_bar, logs_dict={}, client_states={}):
