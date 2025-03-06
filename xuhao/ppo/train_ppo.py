@@ -334,7 +334,7 @@ if __name__ == "__main__":
     log_path = "/root/data/ppo/log_1"
     eval_output_path = "/root/data/ppo/eval_output_1"
 
-    num_episodes = 20
+    num_episodes = 100
     max_epochs = 2
 
     step_split_str = "<|reserved_special_token_0|>"
