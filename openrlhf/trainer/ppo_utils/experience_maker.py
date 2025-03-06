@@ -6,7 +6,6 @@ from typing import List, Optional, Tuple, Union
 import torch
 import torch.nn as nn
 from tqdm import tqdm
-import json
 
 import re
 
@@ -161,7 +160,8 @@ class NaiveExperienceMaker(ABC):
         strategy=None,
         remote_rm_url: str = None,
         reward_fn=None,
-        logger=None
+        logger=None,
+        filter_rm_false_data=False
     ) -> None:
         super().__init__()
         self.actor = actor
@@ -179,6 +179,7 @@ class NaiveExperienceMaker(ABC):
         self.verification_system_message_file = "xuhao/verify/data/input/verification_system_message.txt"
         self.verification_few_shot_file = "xuhao/verify/data/input/verification_few_shot.json"
         self.logger = logger
+        self.filter_rm_false_data = filter_rm_false_data
 
     # tokenizer
     def tokenize_fn(self, texts, max_length, padding=True, device=None):
@@ -241,12 +242,12 @@ class NaiveExperienceMaker(ABC):
             response_sequences = sequences[:, (seq_len - num_actions):].tolist()
             assert sequences[:, (seq_len - num_actions):].shape == experience.kl.shape
 
-            # for i in range(len(response_sequences)):
-            #     # 判断 response 是以 <|eot_id|><|end_of_text|> 结尾还是以 <|reserved_special_token_0|><|end_of_text|> 结尾
-            #     # 如果以 <|eot_id|><|end_of_text|> 结尾, reward 额外 +1
-            #     first_end_of_text_idx = response_sequences[i].index(convert_token_to_id("<|end_of_text|>", self.tokenizer))
-            #     if response_sequences[i][first_end_of_text_idx - 1] == convert_token_to_id("<|eot_id|>", self.tokenizer):
-            #         reward[i][-1] += 1
+            for i in range(len(response_sequences)):
+                # 判断 response 是以 <|eot_id|><|end_of_text|> 结尾还是以 <|reserved_special_token_0|><|end_of_text|> 结尾
+                # 如果以 <|eot_id|><|end_of_text|> 结尾, reward 额外 +1
+                first_end_of_text_idx = response_sequences[i].index(convert_token_to_id("<|end_of_text|>", self.tokenizer))
+                if response_sequences[i][first_end_of_text_idx - 1] == convert_token_to_id("<|eot_id|>", self.tokenizer) and response_sequences[i][first_end_of_text_idx - 2] == convert_token_to_id("<|reserved_special_token_0|>", self.tokenizer):
+                    reward[i][-1] += 1
             
             # 更新 experience.info["reward"]
             average_rewards = [sum(sublist) / len(sublist) for sublist in reward]
@@ -377,11 +378,12 @@ class NaiveExperienceMaker(ABC):
                 solutions = [x[1] for x in tmp]
                 all_valid = all([solution_end_is_valid(solution) for solution in solutions])
 
+                self.logger.info(f"Problems are {problems}")
+                self.logger.info(f"Solutions are {solutions}")
+
                 if all_valid:
                     break
                 else:
-                    self.logger.info(f"Problems are {problems}")
-                    self.logger.info(f"Solutions are {solutions}")
                     self.logger.info("There are invalid solutions, regenerating......")
 
             if sequences.size(0) > 0:
@@ -537,11 +539,13 @@ class NaiveExperienceMaker(ABC):
             self.critic.eval()
 
         verification_result, picked_items = self.verify(samples)
-        verification_result = [verification_result[i] for i in picked_items]
+        if self.filter_rm_false_data:
+            verification_result = [verification_result[i] for i in picked_items]
         assert self.strategy is not None
         r = [[self.strategy.args.correct_step_reward if x else self.strategy.args.incorrect_step_reward for x in res] for res in verification_result]
         
-        samples = samples.subset(picked_items)
+        if self.filter_rm_false_data:
+            samples = samples.subset(picked_items)
 
         assert len(verification_result) == samples.sequences.shape[0]
 

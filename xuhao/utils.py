@@ -212,7 +212,8 @@ def group_elements(elements, group_sizes):
     return result
 
 def solution_end_is_valid(solution: str):
-    return solution.endswith('<|reserved_special_token_0|><|eot_id|>') or solution.endswith('<|reserved_special_token_0|><|reserved_special_token_0|>')
+    # return solution.endswith('<|reserved_special_token_0|><|eot_id|>') or solution.endswith('<|reserved_special_token_0|><|reserved_special_token_0|>')
+    return "####" in solution
 
 def get_eostep_indices(response_sequences: list[list[int]], step_split_token_id: int)->list[list[int]]:
     """

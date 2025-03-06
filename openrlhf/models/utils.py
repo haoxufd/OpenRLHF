@@ -11,19 +11,16 @@ def compute_reward_new(
     reward_clip_range: Tuple[float, float]
 ) -> torch.Tensor:
     """
-    Modified reward computation function that handles variable-length rewards and custom indices.
-    
+    Compute the reward for a batch of samples.
     Args:
-        r: List of lists containing reward values for each sequence
-        kl_coef: KL divergence coefficient
-        kl: KL divergence values as Tensor or list of Tensors
-        action_mask: Optional mask for actions
-        num_actions: Optional number of actions
-        reward_clip_range: Optional range for reward clipping
-        eostep_indices: List of lists containing indices where rewards should be assigned
-    
+        r: List of rewards.
+        eostep_indices: List of indices where the end of the step is.
+        kl_coef: Coefficient for the KL divergence.
+        kl: List of KL divergences.
+        action_mask: Mask for actions.
+        reward_clip_range: Range for clipping rewards.
     Returns:
-        Tensor or list of Tensors containing computed rewards
+        Reward tensor.
     """
     if kl_coef <= 0.0:
         kl_coef = 0.0

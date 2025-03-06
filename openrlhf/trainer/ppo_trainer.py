@@ -148,7 +148,8 @@ class PPOTrainer(ABC):
             strategy,
             remote_rm_url,
             reward_fn,
-            self.logger
+            self.logger,
+            self.args.filter_rm_false_data
         )
         packing_samples = getattr(self.args, "packing_samples", False)
         self.replay_buffer = NaiveReplayBuffer(
@@ -247,6 +248,8 @@ class PPOTrainer(ABC):
                 # 所有进程都使用相同的最小数据量
                 if local_size > min_size:
                     self.replay_buffer.items = self.replay_buffer.items[:min_size]
+
+                self.logger.info(f"Rollout buffer size: {len(self.replay_buffer)}")
 
                 torch.cuda.empty_cache()
                 self.replay_buffer.normalize("advantages", self.strategy)

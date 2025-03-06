@@ -271,6 +271,7 @@ def train(args):
         max_length=args.max_len,
         temperature=args.temperature,
         top_p=args.top_p,
+        num_beams=args.num_beams,
         pad_token_id=tokenizer.pad_token_id,
         eos_token_id=tokenizer.eos_token_id,
         # remote reward model
@@ -308,14 +309,14 @@ if __name__ == "__main__":
     prompt_data = "openai/gsm8k"
 
     micro_train_batch_size = 4
-    train_batch_size = 16
+    train_batch_size = 120
     micro_rollout_batch_size = 4
-    rollout_batch_size = 64
+    rollout_batch_size = 120
     reward_model_generate_batch_size = 4
     max_train_samples = 100000
     max_test_samples = 100
-    eval_steps = 10
-    save_steps = 90
+    eval_steps = 5
+    save_steps = 500
 
     gradient_checkpointing = True
     bf16 = True
@@ -333,10 +334,12 @@ if __name__ == "__main__":
     log_path = "/root/data/ppo/log_1"
     eval_output_path = "/root/data/ppo/eval_output_1"
 
-    num_episodes = 10
-    max_epochs = 1
+    num_episodes = 20
+    max_epochs = 2
 
     step_split_str = "<|reserved_special_token_0|>"
+    filter_rm_false_data = False
+    use_wandb = True
 
     parser = argparse.ArgumentParser()
     # Checkpoint
@@ -400,6 +403,7 @@ if __name__ == "__main__":
     parser.add_argument("--reward_clip_range", type=float, nargs=2, default=(-10, 10), help="Reward clip range")
     parser.add_argument("--correct_step_reward", type=float, default=correct_step_reward)
     parser.add_argument("--incorrect_step_reward", type=float, default=incorrect_step_reward)
+    parser.add_argument("--filter_rm_false_data", action="store_true", default=filter_rm_false_data)
 
     # DeepSpeed
     parser.add_argument("--seed", type=int, default=42)
@@ -465,7 +469,7 @@ if __name__ == "__main__":
     )
 
     # wandb parameters
-    parser.add_argument("--use_wandb", type=str, default=None)
+    parser.add_argument("--use_wandb", type=str, default=use_wandb)
     parser.add_argument("--wandb_org", type=str, default=None)
     parser.add_argument("--wandb_group", type=str, default=None)
     parser.add_argument("--wandb_project", type=str, default="openrlhf_train_ppo")
