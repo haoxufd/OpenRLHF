@@ -1,8 +1,9 @@
 import json
 from itertools import groupby
-from unittest import result
 from datasets import interleave_datasets, load_dataset
 import re
+from deepspeed import get_accelerator
+import torch
 
 def print_item_num(json_file):
     with open(json_file, 'r') as f:
@@ -145,7 +146,8 @@ def get_solve_result(solutions: list, ref_solutions: list):
         else:
             num_correct += 1
 
-    return [num_correct, num_incorrect]
+    total = num_correct + num_incorrect
+    return [num_correct, num_incorrect, total, num_correct / total, incorrect_indices]
 
 def get_steps(solution: str):
     """
@@ -255,3 +257,19 @@ def get_eostep_indices(response_sequences: list[list[int]], step_split_token_id:
 
     # 返回所有响应序列中步骤分割符的索引列表
     return eostep_indices
+
+def preallocate_memory():
+    # 获取当前GPU的显存总量
+    total_mem = get_accelerator().total_memory()
+    
+    # 预留 10% 的显存作为安全余量，防止OOM
+    reserve_mem = int(total_mem * 0.03)
+    prealloc_size = total_mem - reserve_mem
+    
+    # 分配一个大的张量占用显存（保留引用防止被回收）
+    dummy_tensor = torch.empty(
+        (prealloc_size // 4,),  # 假设float32占4字节
+        dtype=torch.float32,
+        device=torch.cuda.current_device()
+    )
+    return dummy_tensor

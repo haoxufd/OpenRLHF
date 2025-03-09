@@ -239,15 +239,16 @@ class PPOTrainer(ABC):
                 for experience in exp_list:
                     self.replay_buffer.append(experience)
 
-                # 首先同步所有进程的数据量
-                local_size = len(self.replay_buffer)
-                size_tensor = torch.LongTensor([local_size]).cuda()
-                torch.distributed.all_reduce(size_tensor, op=torch.distributed.ReduceOp.MIN)
-                min_size = int(size_tensor.item())
-            
-                # 所有进程都使用相同的最小数据量
-                if local_size > min_size:
-                    self.replay_buffer.items = self.replay_buffer.items[:min_size]
+                if self.args.filter_rm_false_data:
+                    # 首先同步所有进程的数据量
+                    local_size = len(self.replay_buffer)
+                    size_tensor = torch.LongTensor([local_size]).cuda()
+                    torch.distributed.all_reduce(size_tensor, op=torch.distributed.ReduceOp.MIN)
+                    min_size = int(size_tensor.item())
+                
+                    # 所有进程都使用相同的最小数据量
+                    if local_size > min_size:
+                        self.replay_buffer.items = self.replay_buffer.items[:min_size]
 
                 self.logger.info(f"Rollout buffer size: {len(self.replay_buffer)}")
 

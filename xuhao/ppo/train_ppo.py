@@ -13,6 +13,7 @@ from openrlhf.models import Actor, get_llm_for_sequence_regression
 from openrlhf.trainer import PPOTrainer
 from openrlhf.utils import get_strategy, get_tokenizer
 from xuhao.utils import blending_datasets
+from xuhao.utils import preallocate_memory
 from xuhao.ppo.prompts_dataset import PromptDataset
 from xuhao.ppo.prompts_dataset_eval import PromptDatasetEval
 
@@ -25,6 +26,8 @@ def train(args):
     strategy.setup_distributed()
 
     logger = init_file_logger(__name__, f"{args.log_path}/log_{dist.get_rank()}.txt")
+    dummy = preallocate_memory()
+    del dummy
 
     # configure model
     # load huggingface model
@@ -297,7 +300,6 @@ def train(args):
 
 
 if __name__ == "__main__":
-    debug = False
     save_value_network = True
     qwen = "/home/user/models/Qwen2.5-1.5B-Instruct"
     llama = "/root/data/models/Meta-Llama-3.1-8B-Instruct"
@@ -313,10 +315,10 @@ if __name__ == "__main__":
     micro_rollout_batch_size = 4
     rollout_batch_size = 120
     reward_model_generate_batch_size = 4
-    max_train_samples = 100000
+    max_train_samples = 1e8
     max_test_samples = 100
     eval_steps = 5
-    save_steps = 500
+    save_steps = 50
 
     gradient_checkpointing = True
     bf16 = True
@@ -351,7 +353,7 @@ if __name__ == "__main__":
     parser.add_argument("--log_path", type=str, default=log_path)
     parser.add_argument("--eval_output_path", type=str, default=eval_output_path)
     parser.add_argument("--max_ckpt_num", type=int, default=3)
-    parser.add_argument("--max_ckpt_mem", type=int, default=1e8)
+    parser.add_argument("--max_ckpt_mem", type=int, default=1e100)
     parser.add_argument("--load_checkpoint", action="store_true", default=load_checkpoint)
 
     # PPO
