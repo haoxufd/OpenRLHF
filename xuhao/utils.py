@@ -3,6 +3,7 @@ from itertools import groupby
 from datasets import interleave_datasets, load_dataset
 import re
 from deepspeed import get_accelerator
+from sympy import denom
 import torch
 
 def print_item_num(json_file):
@@ -151,23 +152,39 @@ def get_solve_result(solutions: list, ref_solutions: list):
 
 def get_steps(solution: str):
     """
+    solution 的格式一定是正确的
     """
     steps = solution.strip().split('<|reserved_special_token_0|>')
-    result = []
-    for step in steps:
-        if step.strip() and step.strip() != "<|eot_id|>":
-            result.append(step.strip())
-    result[-1] = result[-1].split("####")[0].strip() if "####" in result[-1] else result[-1]
+    # steps[-1] = <|eot_id|>
+    steps = steps[:-1]
+    # steps[-1] 以 #### FINAL_VALUE 结束, 需要去掉这个后缀, 因为 reward model 训练的时候最后一步没带后缀
+    steps[-1] = steps[-1].split('\n')[0]
+    # 去掉 step 最后的 \n, 同样是因为 reward model 训练的时候 step 没有以 \n 结束
+    steps = [step.strip() for step in steps]
+    return steps
 
-    return result
+def str_to_num(num_str: str):
+    if '/' not in num_str:
+        return float(num_str.replace(',', ''))
+    else:
+        numerator = float(num_str.split('/')[0].replace(',', ''))
+        denominator = float(num_str.split('/')[1].replace(',', ''))
+        if denominator == 0:
+            return None
+        return numerator / denominator
 
 def get_final_value_from_solution(solution: str) -> float | None:
-    if "####" not in solution:
-        return None
-    content = solution.split("####")[-1]
-    content = content.strip()
-    numbers = find_numbers(content)
-    return None if not numbers else numbers[0]
+    """
+    solution 的格式一定是正确的
+    """
+    end_mark = "<|reserved_special_token_0|><|eot_id|>"
+    number_content = solution.split("#### ")[-1][:-len(end_mark)]
+    assert ' ' not in number_content
+    return str_to_num(number_content)
+
+def get_final_value_from_ref_solution(ref_solution: str) -> float:
+    number_content = ref_solution.split("#### ")[-1]
+    return float(number_content)
 
 def find_newline_indices(s):
     indices = []
@@ -178,12 +195,10 @@ def find_newline_indices(s):
                 indices.append(i)
     return indices
 
-def find_numbers(text: str):
-    pattern = r'-?(?:\d*\.?\d+|\.\d+)(?:,\d{3})*'
-    res = re.findall(pattern, text)
-    # TODO: 识别分数, 如 1/4
-    res = [float(x.replace(',', '')) for x in res]
-    return res
+def is_number(text: str) -> bool:
+    pattern = r'^-?(?:\d{1,3}(?:,\d{3})*(?:\.\d+)?|\d+(?:\.\d+)?|\d+/\d+|\.\d+)$'
+    match = re.fullmatch(pattern, text)
+    return match is not None
 
 def group_elements(elements, group_sizes):
     """
@@ -215,9 +230,17 @@ def group_elements(elements, group_sizes):
 
     return result
 
-def solution_end_is_valid(solution: str):
-    # return solution.endswith('<|reserved_special_token_0|><|eot_id|>') or solution.endswith('<|reserved_special_token_0|><|reserved_special_token_0|>')
-    return "####" in solution
+def solution_is_valid(solution:str):
+    pattern = (
+        r'^'
+        r'(?:.+\n<\|reserved_special_token_0\|>)*'
+        r'.+\n'
+        r'####\s'
+        r'-?(?:\d{1,3}(?:,\d{3})*(?:\.\d+)?|\d+(?:\.\d+)?|\d+/\d+|\.\d+)'
+        r'<\|reserved_special_token_0\|><\|eot_id\|>'
+        r'$'
+    )
+    return re.fullmatch(pattern, solution) is not None
 
 def get_eostep_indices(response_sequences: list[list[int]], step_split_token_id: int)->list[list[int]]:
     """

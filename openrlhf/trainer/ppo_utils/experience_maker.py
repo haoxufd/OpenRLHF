@@ -14,9 +14,9 @@ from openrlhf.models.utils import compute_approx_kl, compute_reward_new, masked_
 
 from openrlhf.utils.utils import convert_token_to_id
 from xuhao.utils import get_steps
-from xuhao.utils import get_final_value_from_solution
+from xuhao.utils import get_final_value_from_solution, get_final_value_from_ref_solution
 from xuhao.utils import group_elements
-from xuhao.utils import solution_end_is_valid
+from xuhao.utils import solution_is_valid
 from xuhao.utils import get_eostep_indices
 
 from openrlhf.utils.utils import convert_token_to_id
@@ -140,7 +140,8 @@ class Samples:
             packed_seq_lens=packed_seq_lens,
             response_length=response_length,
             total_length=total_length,
-            ref_solutions=ref_solutions
+            ref_solutions=ref_solutions,
+            valid=[self.valid[i] for i in indices]
         )
 
 
@@ -243,12 +244,14 @@ class NaiveExperienceMaker(ABC):
             response_sequences = sequences[:, (seq_len - num_actions):].tolist()
             assert sequences[:, (seq_len - num_actions):].shape == experience.kl.shape
 
-            for i in range(len(response_sequences)):
-                # 判断 response 是以 <|eot_id|><|end_of_text|> 结尾还是以 <|reserved_special_token_0|><|end_of_text|> 结尾
-                # 如果以 <|eot_id|><|end_of_text|> 结尾, reward 额外 +1
-                first_end_of_text_idx = response_sequences[i].index(convert_token_to_id("<|end_of_text|>", self.tokenizer))
-                if response_sequences[i][first_end_of_text_idx - 1] == convert_token_to_id("<|eot_id|>", self.tokenizer) and response_sequences[i][first_end_of_text_idx - 2] == convert_token_to_id("<|reserved_special_token_0|>", self.tokenizer):
-                    reward[i][-1] += 1
+            # 下面的代码是通过设置额外的奖励来保证结尾格式正确, 但是随着 ppo 训练进行, 发现 actor 输出的格式错误千奇百怪, 因此目前不使用这个逻辑
+            # 当前采用的逻辑是, 对整个 solution 判断格式是否正确, 如果不正确, 那么不设奖励, 如果正确才在 step level 上分配奖励
+            # for i in range(len(response_sequences)):
+            #     # 判断 response 是以 <|eot_id|><|end_of_text|> 结尾还是以 <|reserved_special_token_0|><|end_of_text|> 结尾
+            #     # 如果以 <|eot_id|><|end_of_text|> 结尾, reward 额外 +1
+            #     first_end_of_text_idx = response_sequences[i].index(convert_token_to_id("<|end_of_text|>", self.tokenizer))
+            #     if response_sequences[i][first_end_of_text_idx - 1] == convert_token_to_id("<|eot_id|>", self.tokenizer) and response_sequences[i][first_end_of_text_idx - 2] == convert_token_to_id("<|reserved_special_token_0|>", self.tokenizer):
+            #         reward[i][-1] += 1
             
             # 更新 experience.info["reward"]
             average_rewards = [sum(sublist) / len(sublist) for sublist in reward]
@@ -262,10 +265,14 @@ class NaiveExperienceMaker(ABC):
             self.logger.info(reward)
             assert len(eostep_indices) == len(reward)
             for i in range(len(eostep_indices)):
-                assert len(eostep_indices[i]) == len(reward[i]) or len(eostep_indices[i]) == (len(reward[i]) + 1)
+                assert len(eostep_indices[i]) == len(reward[i]) or (len(eostep_indices[i]) - (len(reward[i]))) in (-1, 1) 
                 if len(eostep_indices[i]) == (len(reward[i]) + 1):
                     assert eostep_indices[i][-1] ==  (eostep_indices[i][-2] + 1)
                     eostep_indices[i].pop(-1)
+                elif len(eostep_indices[i]) == (len(reward[i]) - 1):
+                    # generate 由于某些原因, 如重复生成, 超出 max_new_tokens, 导致 step 结尾 token 数量比 step 数少 1
+                    eostep_indices[i].append(len(response_sequences[i]) - 1)
+                
             reward = compute_reward_new(
                 reward,
                 eostep_indices,
@@ -376,7 +383,7 @@ class NaiveExperienceMaker(ABC):
             tmp = [self.get_problem_and_solution_llama(text) for text in texts]
             problems = [x[0] for x in tmp]
             solutions = [x[1] for x in tmp]
-            valid = [solution_end_is_valid(solution) for solution in solutions]
+            valid = [solution_is_valid(solution) for solution in solutions]
 
             self.logger.info(f"Problems are {problems}")
             self.logger.info(f"Solutions are {solutions}")
@@ -420,20 +427,26 @@ class NaiveExperienceMaker(ABC):
 
     def verify(self, samples: Samples):
         self.logger.info("Verify solutions by step with reward model......")
+
         texts = self.tokenizer.batch_decode(samples.sequences, skip_special_tokens=False)
         problems = []
         solutions = []
         ref_solutions = samples.ref_solutions
         final_values = []
         ref_values = []
-        for text in texts:
+        valid_tag = samples.valid
+
+        for idx, text in enumerate(texts):
             problem, solution = self.get_problem_and_solution_llama(text)
             problems.append(problem)
             solutions.append(solution)
-            final_values.append(get_final_value_from_solution(solution))
+            if valid_tag[idx]:
+                final_values.append(get_final_value_from_solution(solution))
+            else:
+                final_values.append(None)
         
         for ref_solution in ref_solutions:
-            ref_values.append(get_final_value_from_solution(ref_solution))
+            ref_values.append(get_final_value_from_ref_solution(ref_solution))
 
         solution_labels = [True if final_values[i] == ref_values[i] else False for i in range(len(final_values))]
 
@@ -448,8 +461,12 @@ class NaiveExperienceMaker(ABC):
 
         # Get steps for solutions
         step_list = []
-        for solution in solutions:
-            step_list.append(get_steps(solution))
+        for idx, solution in enumerate(solutions):
+            if valid_tag[idx]:
+                step_list.append(get_steps(solution))
+            else:
+                # If solution is invalid, set steps a None list whose length is equal to the number of <|reserved_special_token_0|>
+                step_list.append([None] * solution.count('<|reserved_special_token_0|>'))
         
         self.logger.info("Steps of each solution>>>>>>")
         for idx, steps in enumerate(step_list):
@@ -459,11 +476,12 @@ class NaiveExperienceMaker(ABC):
         new_problems = []
         new_step_list = []
         new_ref_solutions = []
-        for idx, v in enumerate(samples.valid):
+        for idx, v in enumerate(valid_tag):
             if v:
                 new_problems.append(problems[idx])
                 new_step_list.append(step_list[idx])
                 new_ref_solutions.append(ref_solutions[idx])
+
         prompts = []
         for idx, problem in enumerate(new_problems):
             for idy, step in enumerate(new_step_list[idx]):
@@ -496,41 +514,35 @@ class NaiveExperienceMaker(ABC):
             micro_outputs = self.tokenizer.batch_decode(micro_outputs[:, input_length:], skip_special_tokens=True)
             outputs.extend(micro_outputs)
         
-        r = [False if "Evaluation Result: INCORRECT" in output else True for output in outputs]
+        verification_result = [False if "Evaluation Result: INCORRECT" in output else True for output in outputs]
         num_step = [len(steps) for steps in new_step_list]
 
-        assert sum(num_step) == len(r)
-        assert sum(num_step) == len(outputs)
+        assert sum(num_step) == len(verification_result)
 
-        outputs = group_elements(outputs, num_step)
-        r = group_elements(r, num_step)
+        verification_result = group_elements(verification_result, num_step)
 
         self.logger.info("Verification result before postprocessing>>>>>>")
-        self.logger.info(r)
+        self.logger.info(verification_result)
 
-        # self.logger.info("Verification result for all solutions>>>>>>")
-        # for idx, output in enumerate(outputs):
-        #     self.logger.info(f"Verification result for solution {idx}>>>>>>")
-        #     for idy, data in enumerate(output):
-        #         self.logger.info(f"Step {idy}>>>>>>")
-        #         self.logger.info(data)
-
-        for reward in r:
+        for reward in verification_result:
             if False in reward:
                 index = reward.index(False)
                 reward[index + 1:] = [False] * (len(reward) - index - 1)
         
-        for idx, v in enumerate(samples.valid):
+        for idx, v in enumerate(valid_tag):
             if not v:
-                r.insert(idx, [False] * len(step_list[idx]))
+                verification_result.insert(idx, [False] * len(step_list[idx]))
         
         self.logger.info("Verification result after postprocessing>>>>>>")
-        self.logger.info(r)
+        self.logger.info(verification_result)
         
         picked_items = []
-        for i in range(len(solution_labels)):
-            if solution_labels[i] == all(r[i]):
-                picked_items.append(i)
+        if self.filter_rm_false_data:
+            for i in range(len(solution_labels)):
+                if solution_labels[i] == all(verification_result[i]):
+                    picked_items.append(i)
+        else:
+            picked_items = list(range(len(solution_labels)))
         
         self.logger.info("Picked items>>>>>>")
         self.logger.info(picked_items)
@@ -538,7 +550,7 @@ class NaiveExperienceMaker(ABC):
         if picked_items == []:
             picked_items = [0]
 
-        return r, picked_items
+        return verification_result, picked_items
 
     @torch.no_grad()
     def make_experience(self, samples: Samples) -> Experience|None:
@@ -553,14 +565,11 @@ class NaiveExperienceMaker(ABC):
             self.critic.eval()
 
         verification_result, picked_items = self.verify(samples)
-        if self.filter_rm_false_data:
-            verification_result = [verification_result[i] for i in picked_items]
+        verification_result = [verification_result[i] for i in picked_items]
         assert self.strategy is not None
         r = [[self.strategy.args.correct_step_reward if x else self.strategy.args.incorrect_step_reward for x in res] for res in verification_result]
         
-        if self.filter_rm_false_data:
-            samples = samples.subset(picked_items)
-
+        samples = samples.subset(picked_items)
         assert len(verification_result) == samples.sequences.shape[0]
 
         # extract values from samples

@@ -166,14 +166,14 @@ if __name__ == "__main__":
     max_samples = 1e8
     dataset = "openai/gsm8k"
     load_checkpoint = False
-    max_epoches = 2
+    max_epoches = 2000
     input_key = "question"
     output_key = "answer"
     save_path = "/root/data/sft_am/ckpt_1"
     ckpt_path = "/root/data/sft_am/ckpt_1/checkpoints_sft"
 
     micro_train_batch_size = 8
-    train_batch_size = 48
+    train_batch_size = 32
 
 
     # Checkpoint
