@@ -311,9 +311,9 @@ if __name__ == "__main__":
     prompt_data = "openai/gsm8k"
 
     micro_train_batch_size = 4
-    train_batch_size = 120
+    train_batch_size = 128
     micro_rollout_batch_size = 4
-    rollout_batch_size = 120
+    rollout_batch_size = 128
     reward_model_generate_batch_size = 4
     max_train_samples = 1e8
     max_test_samples = 100
@@ -330,7 +330,7 @@ if __name__ == "__main__":
     correct_step_reward = 1.0
     incorrect_step_reward = 0
 
-    load_checkpoint = False
+    load_checkpoint = True
     save_path = "/root/data/ppo/ckpt_1"
     ckpt_path = "/root/data/ppo/ckpt_1/checkpoints_ppo"
     log_path = "/root/data/ppo/log_1"

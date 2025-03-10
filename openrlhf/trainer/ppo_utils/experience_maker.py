@@ -118,6 +118,7 @@ class Samples:
     response_length: torch.Tensor
     total_length: torch.Tensor
     ref_solutions: list[str]
+    valid: list[bool]
 
     def subset(self, indices: list[int]) -> "Samples":
         # 提取指定索引的样本
@@ -367,24 +368,21 @@ class NaiveExperienceMaker(ABC):
             ref_solutions = all_ref_solutions[i : i + args.micro_rollout_batch_size]
             inputs = self.tokenize_fn(prompts, self.prompt_max_len, device=torch.cuda.current_device())
 
-            while True:
-                self.logger.info(f"Generate kwargs: {generate_kwargs}")
-                sequences, attention_mask, action_mask = self.actor.generate(**inputs, **generate_kwargs)
-                
-                texts = self.tokenizer.batch_decode(sequences, skip_special_tokens=False)
-                
-                tmp = [self.get_problem_and_solution_llama(text) for text in texts]
-                problems = [x[0] for x in tmp]
-                solutions = [x[1] for x in tmp]
-                all_valid = all([solution_end_is_valid(solution) for solution in solutions])
+            self.logger.info(f"Generate kwargs: {generate_kwargs}")
+            sequences, attention_mask, action_mask = self.actor.generate(**inputs, **generate_kwargs)
+            
+            texts = self.tokenizer.batch_decode(sequences, skip_special_tokens=False)
+            
+            tmp = [self.get_problem_and_solution_llama(text) for text in texts]
+            problems = [x[0] for x in tmp]
+            solutions = [x[1] for x in tmp]
+            valid = [solution_end_is_valid(solution) for solution in solutions]
 
-                self.logger.info(f"Problems are {problems}")
-                self.logger.info(f"Solutions are {solutions}")
+            self.logger.info(f"Problems are {problems}")
+            self.logger.info(f"Solutions are {solutions}")
 
-                if all_valid:
-                    break
-                else:
-                    self.logger.info("There are invalid solutions, regenerating......")
+            if not all(valid):
+                self.logger.info("There are invalid solutions")
 
             if sequences.size(0) > 0:
                 samples = Samples(
@@ -395,7 +393,8 @@ class NaiveExperienceMaker(ABC):
                     packed_seq_lens=None,
                     response_length=action_mask.float().sum(dim=-1),
                     total_length=attention_mask.float().sum(dim=-1),
-                    ref_solutions=ref_solutions
+                    ref_solutions=ref_solutions,
+                    valid=valid
                 )
                 samples_list.append(samples)
 
@@ -456,11 +455,19 @@ class NaiveExperienceMaker(ABC):
         for idx, steps in enumerate(step_list):
             self.logger.info(f"Steps for solution {idx}")
             self.logger.info(steps)
-        
+
+        new_problems = []
+        new_step_list = []
+        new_ref_solutions = []
+        for idx, v in enumerate(samples.valid):
+            if v:
+                new_problems.append(problems[idx])
+                new_step_list.append(step_list[idx])
+                new_ref_solutions.append(ref_solutions[idx])
         prompts = []
-        for idx, problem in enumerate(problems):
-            for idy, step in enumerate(step_list[idx]):
-                prompts.append(self.preprocess_data(problem, ref_solutions[idx], step_list[idx][:idy], step))
+        for idx, problem in enumerate(new_problems):
+            for idy, step in enumerate(new_step_list[idx]):
+                prompts.append(self.preprocess_data(problem, new_ref_solutions[idx], new_step_list[idx][:idy], step))
         
         assert self.strategy is not None
         micro_prompt_list = []
@@ -490,7 +497,7 @@ class NaiveExperienceMaker(ABC):
             outputs.extend(micro_outputs)
         
         r = [False if "Evaluation Result: INCORRECT" in output else True for output in outputs]
-        num_step = [len(steps) for steps in step_list]
+        num_step = [len(steps) for steps in new_step_list]
 
         assert sum(num_step) == len(r)
         assert sum(num_step) == len(outputs)
@@ -498,19 +505,26 @@ class NaiveExperienceMaker(ABC):
         outputs = group_elements(outputs, num_step)
         r = group_elements(r, num_step)
 
-        self.logger.info("Verification result for all solutions>>>>>>")
-        for idx, output in enumerate(outputs):
-            self.logger.info(f"Verification result for solution {idx}>>>>>>")
-            for idy, data in enumerate(output):
-                self.logger.info(f"Step {idy}>>>>>>")
-                self.logger.info(data)
+        self.logger.info("Verification result before postprocessing>>>>>>")
+        self.logger.info(r)
+
+        # self.logger.info("Verification result for all solutions>>>>>>")
+        # for idx, output in enumerate(outputs):
+        #     self.logger.info(f"Verification result for solution {idx}>>>>>>")
+        #     for idy, data in enumerate(output):
+        #         self.logger.info(f"Step {idy}>>>>>>")
+        #         self.logger.info(data)
 
         for reward in r:
             if False in reward:
                 index = reward.index(False)
                 reward[index + 1:] = [False] * (len(reward) - index - 1)
         
-        self.logger.info("Verification result accumulation>>>>>>")
+        for idx, v in enumerate(samples.valid):
+            if not v:
+                r.insert(idx, [False] * len(step_list[idx]))
+        
+        self.logger.info("Verification result after postprocessing>>>>>>")
         self.logger.info(r)
         
         picked_items = []

@@ -162,7 +162,9 @@ def get_steps(solution: str):
     return result
 
 def get_final_value_from_solution(solution: str) -> float | None:
-    content = solution.split("####")[-1] if "####" in solution else solution.split('\n')[-1]
+    if "####" not in solution:
+        return None
+    content = solution.split("####")[-1]
     content = content.strip()
     numbers = find_numbers(content)
     return None if not numbers else numbers[0]
