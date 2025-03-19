@@ -184,7 +184,7 @@ def get_final_value_from_solution(solution: str) -> float | None:
 
 def get_final_value_from_ref_solution(ref_solution: str) -> float:
     number_content = ref_solution.split("#### ")[-1]
-    return float(number_content)
+    return float(number_content.replace(',', ''))
 
 def find_newline_indices(s):
     indices = []

@@ -244,11 +244,11 @@ class NaiveExperienceMaker(ABC):
             response_sequences = sequences[:, (seq_len - num_actions):].tolist()
             assert sequences[:, (seq_len - num_actions):].shape == experience.kl.shape
 
-            # 下面的代码是通过设置额外的奖励来保证结尾格式正确, 但是随着 ppo 训练进行, 发现 actor 输出的格式错误千奇百怪, 因此目前不使用这个逻辑
-            # 当前采用的逻辑是, 对整个 solution 判断格式是否正确, 如果不正确, 那么不设奖励, 如果正确才在 step level 上分配奖励
+            # # 下面的代码是通过设置额外的奖励来保证结尾格式正确, 但是随着 ppo 训练进行, 发现 actor 输出的格式错误千奇百怪, 因此目前不使用这个逻辑
+            # # 当前采用的逻辑是, 对整个 solution 判断格式是否正确, 如果不正确, 那么不设奖励, 如果正确才在 step level 上分配奖励
             # for i in range(len(response_sequences)):
-            #     # 判断 response 是以 <|eot_id|><|end_of_text|> 结尾还是以 <|reserved_special_token_0|><|end_of_text|> 结尾
-            #     # 如果以 <|eot_id|><|end_of_text|> 结尾, reward 额外 +1
+            #     # 判断 response 是否以 <|reserved_special_token_0|><|eot_id|><|end_of_text|> 结尾
+            #     # 如果以此结尾, 奖励额外 + 1
             #     first_end_of_text_idx = response_sequences[i].index(convert_token_to_id("<|end_of_text|>", self.tokenizer))
             #     if response_sequences[i][first_end_of_text_idx - 1] == convert_token_to_id("<|eot_id|>", self.tokenizer) and response_sequences[i][first_end_of_text_idx - 2] == convert_token_to_id("<|reserved_special_token_0|>", self.tokenizer):
             #         reward[i][-1] += 1
@@ -571,6 +571,9 @@ class NaiveExperienceMaker(ABC):
         
         samples = samples.subset(picked_items)
         assert len(verification_result) == samples.sequences.shape[0]
+
+        for idx, valid_tag in enumerate(samples.valid):
+            r[idx][-1] += self.strategy.args.correct_format_reward if valid_tag else self.strategy.args.incorrect_format_reward
 
         # extract values from samples
         sequences = samples.sequences

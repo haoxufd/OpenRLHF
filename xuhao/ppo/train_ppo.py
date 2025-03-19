@@ -4,7 +4,6 @@ import math
 import os
 from datetime import datetime
 
-from numpy import save
 import torch
 from transformers.trainer import get_scheduler
 
@@ -329,6 +328,8 @@ if __name__ == "__main__":
 
     correct_step_reward = 1.0
     incorrect_step_reward = 0
+    correct_format_reward = 2.0
+    incorrect_format_reward = 0
 
     load_checkpoint = True
     save_path = "/root/data/ppo/ckpt_1"
@@ -387,7 +388,7 @@ if __name__ == "__main__":
         "--n_samples_per_prompt", type=int, default=1, help="number of responses for each prompt in generation"
     )
     parser.add_argument("--save_value_network", action="store_true", default=save_value_network, help="Save critic model")
-    parser.add_argument("--actor_learning_rate", type=float, default=1e-6)
+    parser.add_argument("--actor_learning_rate", type=float, default=1e-8)
     parser.add_argument("--critic_learning_rate", type=float, default=9e-6)
     parser.add_argument("--lr_warmup_ratio", type=float, default=0.03)
     parser.add_argument("--kl_target", type=float, default=None)
@@ -405,6 +406,8 @@ if __name__ == "__main__":
     parser.add_argument("--reward_clip_range", type=float, nargs=2, default=(-10, 10), help="Reward clip range")
     parser.add_argument("--correct_step_reward", type=float, default=correct_step_reward)
     parser.add_argument("--incorrect_step_reward", type=float, default=incorrect_step_reward)
+    parser.add_argument("--correct_format_reward", type=float, default=correct_format_reward)
+    parser.add_argument("--incorrect_format_reward", type=float, default=incorrect_format_reward)
     parser.add_argument("--filter_rm_false_data", action="store_true", default=filter_rm_false_data)
 
     # DeepSpeed
