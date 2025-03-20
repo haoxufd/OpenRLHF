@@ -5,6 +5,9 @@ import re
 from xuhao.utils import get_solve_result
 import csv
 import os
+import pandas as pd
+import matplotlib.pyplot as plt
+from matplotlib.ticker import PercentFormatter
 
 from datasets import load_dataset
 
@@ -33,6 +36,29 @@ def _calc_ppo_eval_result(
     
     print(f"Eval result has been successfully writen to {output_file}")
 
+def visualize_acc(csv_path, output_name="accuracy_plot.png"):
+
+    df = pd.read_csv(csv_path)
+    if "Acc" not in df.columns:
+        raise ValueError("row 'Acc' not in the csv file")
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.plot(range(1, len(df)+1), 
+            df["Acc"],
+            marker='o',
+            color='#E74C3C',
+            linewidth=2)
+    
+    ax.set_title("Model Accuracy Progression", fontsize=14, pad=15)
+    ax.set_xlabel("Eval Step", fontsize=12)
+    ax.set_ylabel("Accuracy", fontsize=12)
+    ax.yaxis.set_major_formatter(PercentFormatter(1.0))
+    ax.set_ylim(0, 1)
+    ax.grid(ls='--', alpha=0.5)
+
+    plt.tight_layout()
+    plt.savefig(output_name, dpi=300, bbox_inches='tight')  # 关键修改点
+    plt.close(fig)  
 def calc_ppo_eval_result(args):
     ref_solutions = load_dataset("openai/gsm8k", "main")["test"]["answer"][:args.num_eval_data]
     # 获取 args.eval_output_dir 下的所有名为 eval_step_i.json 的文件
@@ -40,6 +66,14 @@ def calc_ppo_eval_result(args):
     solution_files.sort(key=lambda x: int(re.search(r'eval_step_(\d+)\.json$', x).group(1)))
     
     _calc_ppo_eval_result(solution_files, ref_solutions, args.eval_output_dir + "/result.csv", args.print_incorrect_indices)
+
+    csv_path = os.path.join(args.eval_output_dir, "result.csv")
+
+    # 新增可视化调用
+    plot_path = os.path.join(args.eval_output_dir, "accuracy_curve.png")
+    visualize_acc(csv_path, plot_path)  # 调用可视化函数
+    print(f"Visualization saved to {plot_path}")
+
 
 if __name__ == "__main__":
     # python xuhao/solve/analyze_solution.py --num_eval_data=100 --num_eval=6 --eval_output_dir=/root/data/ppo/eval_output_1
@@ -51,3 +85,4 @@ if __name__ == "__main__":
     paser.add_argument("--print_incorrect_indices", action="store_true", default=False)
 
     calc_ppo_eval_result(paser.parse_args())
+
