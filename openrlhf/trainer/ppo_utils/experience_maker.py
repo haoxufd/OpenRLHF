@@ -577,8 +577,10 @@ class NaiveExperienceMaker(ABC):
         assert len(verification_result) == samples.sequences.shape[0]
 
         for idx, valid_tag in enumerate(samples.valid):
-            r[idx][-1] += self.strategy.args.correct_format_reward if valid_tag else self.strategy.args.incorrect_format_reward
-
+            if r[idx]:
+                r[idx][-1] += self.strategy.args.correct_format_reward if valid_tag else self.strategy.args.incorrect_format_reward
+            else:
+                r[idx].append(self.strategy.args.correct_format_reward if valid_tag else self.strategy.args.incorrect_format_reward)
         # extract values from samples
         sequences = samples.sequences
         attention_mask = samples.attention_mask

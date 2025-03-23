@@ -32,7 +32,10 @@ def compute_reward_new(
     eos_indices = eos_indices.tolist()
     assert len(eos_indices) == len(eostep_indices)
     for i in range(len(eos_indices)):
-        eostep_indices[i][-1] = eos_indices[i][0]
+        if eos_indices[i]:
+            eostep_indices[i][-1] = eos_indices[i][0]
+        else:
+            eostep_indices[i].append(eos_indices[i][0])
     kl_reward = -kl_coef * kl
     # Initialize reward tensor
     last_reward = torch.zeros_like(kl, dtype=kl.dtype)

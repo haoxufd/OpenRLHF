@@ -308,9 +308,9 @@ if __name__ == "__main__":
     prompt_data = "openai/gsm8k"
 
     micro_train_batch_size = 2
-    train_batch_size = 128
+    train_batch_size = 64
     micro_rollout_batch_size = 4
-    rollout_batch_size = 1024
+    rollout_batch_size = 512
     reward_model_generate_batch_size = 4
     max_train_samples = 100000
     max_test_samples = 100
@@ -326,7 +326,7 @@ if __name__ == "__main__":
 
     correct_step_reward = 1.0
     incorrect_step_reward = -1.0
-    correct_format_reward = 5.0
+    correct_format_reward = 1.5
     incorrect_format_reward = -5.0
 
     load_checkpoint = True
