@@ -25,8 +25,6 @@ def train(args):
     strategy.setup_distributed()
 
     logger = init_file_logger(__name__, f"{args.log_path}/log_{dist.get_rank()}.txt")
-    dummy = preallocate_memory()
-    del dummy
 
     # configure model
     # load huggingface model
@@ -309,27 +307,27 @@ if __name__ == "__main__":
     critic_pretrain = llama
     prompt_data = "openai/gsm8k"
 
-    micro_train_batch_size = 4
+    micro_train_batch_size = 2
     train_batch_size = 128
     micro_rollout_batch_size = 4
-    rollout_batch_size = 128
+    rollout_batch_size = 1024
     reward_model_generate_batch_size = 4
-    max_train_samples = 1e8
+    max_train_samples = 100000
     max_test_samples = 100
-    eval_steps = 5
-    save_steps = 50
+    eval_steps = 1
+    save_steps = 10
 
     gradient_checkpointing = True
     bf16 = True
     prompt_max_len = 1024
-    generate_max_len = 512
+    generate_max_len = 1024
     rm_prompt_max_len = 2048
     num_beams = 2
 
     correct_step_reward = 1.0
-    incorrect_step_reward = 0
-    correct_format_reward = 2.0
-    incorrect_format_reward = 0
+    incorrect_step_reward = -1.0
+    correct_format_reward = 5.0
+    incorrect_format_reward = -5.0
 
     load_checkpoint = True
     save_path = "/root/data/ppo/ckpt_1"
@@ -338,7 +336,7 @@ if __name__ == "__main__":
     eval_output_path = "/root/data/ppo/eval_output_1"
 
     num_episodes = 100
-    max_epochs = 2
+    max_epochs = 1
 
     step_split_str = "<|reserved_special_token_0|>"
     filter_rm_false_data = False
@@ -376,11 +374,11 @@ if __name__ == "__main__":
     parser.add_argument("--ptx_coef", type=float, default=0.05, help="PPO-ptx loss coef")
     parser.add_argument("--eps_clip", type=float, default=0.2, help="PPO clip range")
     parser.add_argument("--value_clip", type=float, default=0.2, help="PPO value clip range")
-    parser.add_argument("--lambd", type=float, default=0.95, help="PPO GAE lambd")
-    parser.add_argument("--gamma", type=float, default=0.99, help="PPO GAE gamma")
+    parser.add_argument("--lambd", type=float, default=1.0, help="PPO GAE lambd")
+    parser.add_argument("--gamma", type=float, default=1, help="PPO GAE gamma")
     parser.add_argument("--micro_train_batch_size", type=int, default=micro_train_batch_size, help="batch size per GPU")
     parser.add_argument("--train_batch_size", type=int, default=train_batch_size, help="Global training batch size")
-    parser.add_argument("--normalize_reward", action="store_true", default=False, help="Enable Reward Normazation")
+    parser.add_argument("--normalize_reward", action="store_true", default=True, help="Enable Reward Normazation")
     parser.add_argument("--top_p", type=float, default=1.0)
     parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--freezing_actor_steps", type=int, default=-1, help="Used for critic initialization")
@@ -388,7 +386,7 @@ if __name__ == "__main__":
         "--n_samples_per_prompt", type=int, default=1, help="number of responses for each prompt in generation"
     )
     parser.add_argument("--save_value_network", action="store_true", default=save_value_network, help="Save critic model")
-    parser.add_argument("--actor_learning_rate", type=float, default=1e-8)
+    parser.add_argument("--actor_learning_rate", type=float, default=5e-7)
     parser.add_argument("--critic_learning_rate", type=float, default=9e-6)
     parser.add_argument("--lr_warmup_ratio", type=float, default=0.03)
     parser.add_argument("--kl_target", type=float, default=None)
@@ -420,7 +418,7 @@ if __name__ == "__main__":
     parser.add_argument("--zpg", type=int, default=1, help="ZeRO++ max partition size")
     parser.add_argument("--adam_offload", action="store_true", default=True, help="Offload Adam Optimizer")
     parser.add_argument("--actor_init_on_gpu", action="store_true", default=False)
-    parser.add_argument("--flash_attn", action="store_true", default=False, help="Enable FlashAttention2")
+    parser.add_argument("--flash_attn", action="store_true", default=True, help="Enable FlashAttention2")
     parser.add_argument("--aux_loss_coef", type=float, default=0, help="MoE balancing loss")
     parser.add_argument("--grad_accum_dtype", type=str, default=None, help="Adam grad accum data type")
     parser.add_argument("--overlap_comm", action="store_true", default=False)
@@ -459,7 +457,7 @@ if __name__ == "__main__":
         help="sampling probs for datasets",
     )
     parser.add_argument("--prompt_split", type=str, default="train")
-    parser.add_argument("--pretrain_data", type=str, default=None, help="HF dataset name or path")
+    parser.add_argument("--pretrain_data", type=str, default="openai/gsm8k", help="HF dataset name or path")
     parser.add_argument(
         "--pretrain_data_probs",
         type=str,

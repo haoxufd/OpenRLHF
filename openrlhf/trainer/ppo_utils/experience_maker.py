@@ -273,6 +273,10 @@ class NaiveExperienceMaker(ABC):
                     # generate 由于某些原因, 如重复生成, 超出 max_new_tokens, 导致 step 结尾 token 数量比 step 数少 1
                     eostep_indices[i].append(len(response_sequences[i]) - 1)
                 
+            self.logger.info("KL penalty: ")
+            self.logger.info(f"{(experience.kl * self.kl_ctl.value).tolist()}")
+            self.logger.info(f"{(experience.kl.sum(dim=-1) * self.kl_ctl.value).tolist()}")
+
             reward = compute_reward_new(
                 reward,
                 eostep_indices,
