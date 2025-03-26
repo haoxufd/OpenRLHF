@@ -298,3 +298,248 @@ def preallocate_memory():
         device=torch.cuda.current_device()
     )
     return dummy_tensor
+
+def analyze_training_logs(log_file_path, output_dir, debug = False):
+    """
+    分析训练日志文件，计算每个训练步骤的准确率，并生成CSV文件和图表。
+    
+    参数:
+    log_file_path (str): 日志文件路径
+    output_dir (str): 输出目录，用于保存CSV文件和图表
+    debug (bool): 是否输出调试信息
+    """
+    # 确保输出目录存在
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # 读取日志文件行
+    with open(log_file_path, 'r', encoding='utf-8') as file:
+        log_lines = file.readlines()
+    
+    if debug:
+        print(f"日志文件共 {len(log_lines)} 行")
+    
+    # 按Make Experience编号分组
+    experiences = []
+    current_exp_num = None
+    current_exp_lines = []
+    
+    for line in log_lines:
+        exp_match = re.search(r'Make \'Experience\' (\d+)', line)
+        if exp_match:
+            # 如果已经在处理一个experience，保存它
+            if current_exp_num is not None:
+                experiences.append((current_exp_num, current_exp_lines))
+            
+            # 开始新的experience
+            current_exp_num = int(exp_match.group(1))
+            current_exp_lines = [line]
+        elif current_exp_num is not None:
+            # 继续添加到当前experience
+            current_exp_lines.append(line)
+    
+    # 添加最后一个experience
+    if current_exp_num is not None and current_exp_lines:
+        experiences.append((current_exp_num, current_exp_lines))
+    
+    if debug:
+        print(f"找到 {len(experiences)} 个Experience记录")
+    
+    # 按步骤分组
+    steps_data = {}
+    current_step = 1
+    
+    for exp_num, exp_lines in experiences:
+        # 检查是否是新步骤的开始
+        if exp_num == 0 and len(steps_data.get(current_step, [])) > 0:
+            current_step += 1
+        
+        if current_step not in steps_data:
+            steps_data[current_step] = []
+        
+        steps_data[current_step].append((exp_num, exp_lines))
+    
+    # 过滤掉 Experience 数量不足 32 的步骤
+    filtered_steps_data = {step: exps for step, exps in steps_data.items() if len(exps) >= 32}
+
+    if debug:
+        print(f"找到 {len(steps_data)} 个训练步骤")
+        # for step, exps in steps_data.items():
+        #     print(f"步骤 {step}: {len(exps)} 个Experience")
+        
+        # 打印被忽略的步骤
+        ignored_steps = set(steps_data.keys()) - set(filtered_steps_data.keys())
+        if ignored_steps:
+            print(f"以下步骤因 Experience 数量不足 32 被忽略: {sorted(ignored_steps)}")
+
+    # 使用过滤后的步骤数据进行后续处理
+    steps_data = filtered_steps_data
+
+    if debug:
+        print(f"保留 {len(steps_data)} 个训练步骤")
+
+    results_actor = []
+    results_reward = []
+
+    # 处理每个步骤
+    for step_num, experiences in steps_data.items():
+        if debug:
+            print(f"处理步骤 {step_num}...")
+        
+        # 初始化计数器
+        total_correct = 0
+        total_samples = 0
+        
+        # rm acc计算的变量
+        true_positive = 0  # T-T 和 F-F
+        total_samples_rm = 0
+        
+        # 遍历每个experience
+        for exp_idx, (exp_num, exp_lines) in enumerate(experiences):
+            # 提取 Solution labels
+            solution_labels = []
+            label_found = False
+            
+            for i, line in enumerate(exp_lines):
+                if "Solution labels>>>>>>" in line and i+1 < len(exp_lines):
+                    next_line = exp_lines[i+1]
+                    label_match = re.search(r'\[(.*?)\]', next_line)
+                    if label_match:
+                        label_str = label_match.group(1)
+                        try:
+                            # 使用安全的列表解析来解析布尔值
+                            solution_labels = [s.strip().lower() == 'true' for s in label_str.split(',')]
+                            label_found = True
+                            break
+                        except Exception as e:
+                            if debug:
+                                print(f"解析Solution labels出错: {e}")
+            
+            if not label_found:
+                if debug and exp_idx < 2:
+                    print(f"Experience {exp_num} 无法找到Solution labels")
+                continue
+                
+            # if debug and exp_idx < 2:
+            #     print(f"Experience {exp_num} 的Solution labels: {solution_labels}")
+            
+            # 提取 Verification result
+            verification_results = []
+            verif_found = False
+            
+            for i, line in enumerate(exp_lines):
+                if "Verification result after postprocessing>>>>>>" in line and i+1 < len(exp_lines):
+                    next_line = exp_lines[i+1]
+                    
+                    # 直接提取行中的嵌套列表
+                    try:
+                        # 尝试提取完整的嵌套列表字符串
+                        verif_str_match = re.search(r'\](.*?)$', next_line)
+                        if verif_str_match:
+                            verif_str = verif_str_match.group(1).strip()
+                            
+                            # 确保字符串是有效的Python列表格式
+                            if not verif_str.startswith("[") or not verif_str.endswith("]"):
+                                verif_str = "[" + verif_str + "]"
+                            
+                            # 替换True/False为Python的true/false
+                            verif_str = verif_str.replace("True", "true").replace("False", "false")
+                            
+                            # 使用eval安全地解析嵌套列表
+                            parsed_list = eval(verif_str, {"true": True, "false": False})
+                            
+                            # 将每个内部列表转换为布尔值列表
+                            for inner_list in parsed_list:
+                                if isinstance(inner_list, list):
+                                    verification_results.append([bool(item) for item in inner_list])
+                            
+                            verif_found = True
+                            break
+                    except Exception as e:
+                        if debug:
+                            print(f"解析Verification result出错: {e}")
+                            print(f"问题行: {next_line}")
+            
+            if not verif_found:
+                if debug and exp_idx < 2:
+                    print(f"Experience {exp_num} 无法找到Verification result")
+                continue
+                
+            # if debug and exp_idx < 2:
+            #     print(f"Experience {exp_num} 的Verification results: {verification_results}")
+            
+            # 确保两个列表长度相同
+            if len(solution_labels) != len(verification_results):
+                if debug and exp_idx < 2:
+                    print(f"Experience {exp_num} Solution labels和Verification result长度不匹配: {len(solution_labels)} vs {len(verification_results)}")
+                continue
+            
+            # 更新计数
+            total_correct += sum(solution_labels)
+            total_samples += len(solution_labels)
+            
+            # 统计rm acc
+            for i, (label, verification) in enumerate(zip(solution_labels, verification_results)):
+                if label:  # Solution label is True
+                    if all(verification):  # All verification steps are True
+                        true_positive += 1
+                else:  # Solution label is False
+                    if not all(verification):  # At least one verification step is False
+                        true_positive += 1
+                total_samples_rm += 1
+        
+        
+        # 计算acc和rm acc
+        accuracy = total_correct / total_samples if total_samples > 0 else 0
+        rm_accuracy = true_positive / total_samples_rm if total_samples_rm > 0 else 0
+        
+        results_actor.append({
+            'Num Correct':total_correct,
+            'Num Inorrect':total_samples - total_correct,
+            'Total':total_samples,
+            'Acc': accuracy,
+        })
+        results_reward.append({
+            'Num Correct': true_positive,
+            'Num Inorrect':total_samples_rm - true_positive,
+            'Total':total_samples_rm,
+            'Acc': rm_accuracy
+        })
+    
+    # 保存CSV文件
+    df_actor = pd.DataFrame(results_actor)
+    actor_csv_path = os.path.join(output_dir, 'results_actor.csv')
+    df_actor.to_csv(actor_csv_path, index=False)
+    
+    df_reward = pd.DataFrame(results_reward)
+    reward_csv_path = os.path.join(output_dir, 'results_reward.csv')
+    df_reward.to_csv(reward_csv_path, index=False)
+
+    # 生成图表
+    plt.figure(figsize=(12, 6))
+    
+    # am曲线
+    plt.subplot(1, 2, 1)
+    plt.plot(range(1,len(df_actor) + 1), df_actor['Acc'], 'b-', marker='o')
+    plt.title('Actor Model Accuracy with Step')
+    plt.xlabel('Step')
+    plt.ylabel('AM Accuracy')
+    plt.grid(True)
+    
+    # rm曲线
+    plt.subplot(1, 2, 2)
+    plt.plot(range(1,len(df_reward) + 1), df_reward['Acc'], 'r-', marker='o')
+    plt.title('Reward Model Accuracy with Step')
+    plt.xlabel('Step')
+    plt.ylabel('RM Accuracy')
+    plt.grid(True)
+    
+    plt.tight_layout()
+    
+    # 保存图表
+    plot_path = os.path.join(output_dir, 'training_metrics_plot.png')
+    plt.savefig(plot_path)
+    
+    # 关闭图表
+    plt.close()
+    
+    return actor_csv_path, reward_csv_path, plot_path
