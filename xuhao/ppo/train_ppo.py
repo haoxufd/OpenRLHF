@@ -304,7 +304,7 @@ if __name__ == "__main__":
     llama_reward = "/root/data/models/reward-llama-3.1-8b-sft-gsm8k"
     pretrain = llama_actor
     reward_pretrain = llama_reward
-    critic_pretrain = llama
+    critic_pretrain = None
     prompt_data = "openai/gsm8k"
 
     micro_train_batch_size = 2
@@ -430,7 +430,7 @@ if __name__ == "__main__":
         "--advantage_estimator",
         type=str,
         choices=["gae", "reinforce", "rloo"],
-        default="gae",
+        default="reinforce",
         help="Choose advantage estimation method: gae, reinforce, rloo",
     )
 
