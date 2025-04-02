@@ -164,7 +164,8 @@ if __name__ == "__main__":
     eval_acc_steps = 1e8
     pretrain = "/root/data/models/Meta-Llama-3.1-8B"
     max_samples = 1e8
-    dataset = "openai/gsm8k"
+    #dataset = "openai/gsm8k"
+    dataset = "lanzhiaurora44/gsm8k-20p"
     load_checkpoint = False
     max_epoches = 2000
     input_key = "question"

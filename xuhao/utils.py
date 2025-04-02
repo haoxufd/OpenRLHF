@@ -87,7 +87,7 @@ def blending_datasets(
         data_dir = dataset.split("@")[1].strip() if "@" in dataset else None
         dataset = dataset.split("@")[0].strip()
         
-        data = load_dataset(dataset, "main")
+        data = load_dataset(dataset, "main", trust_remote_code = "true")
         strategy.print(f"loaded {dataset} from files")
 
         if train_split and train_split in data:
