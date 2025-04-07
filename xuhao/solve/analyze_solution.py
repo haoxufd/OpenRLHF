@@ -74,6 +74,17 @@ def calc_ppo_eval_result(args):
     visualize_acc(csv_path, plot_path)  # 调用可视化函数
     print(f"Visualization saved to {plot_path}")
 
+def calc_single_solve_acc(solution_file):
+    ref_solutions = load_dataset("openai/gsm8k", "main")["test"]["answer"]
+    with open(solution_file, "r") as f:
+        solutions = json.load(f)
+    result = get_solve_result(solutions, ref_solutions)
+
+    print(f"Total: {result[2]}")
+    print(f"Num Correct: {result[0]}")
+    print(f"Num Incorrect: {result[1]}")
+    print(f"Accuracy: {result[3]}")
+    print(f"Incorrect Solutions: {result[4]}") 
 
 if __name__ == "__main__":
     # python xuhao/solve/analyze_solution.py --num_eval_data=100 --num_eval=6 --eval_output_dir=/root/data/ppo/eval_output_1
@@ -83,6 +94,12 @@ if __name__ == "__main__":
     paser.add_argument("--num_eval", type=int, default=10)
     paser.add_argument("--eval_output_dir", type=str, default="/root/data/ppo/eval_output_1")
     paser.add_argument("--print_incorrect_indices", action="store_true", default=False)
+    
+    paser.add_argument("--solution_file", type=str, default=None)
 
-    calc_ppo_eval_result(paser.parse_args())
+    args = paser.parse_args()
 
+    if args.solution_file is not None:
+        calc_single_solve_acc(args.solution_file)
+    else:
+        calc_ppo_eval_result(args)

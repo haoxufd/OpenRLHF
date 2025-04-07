@@ -157,7 +157,7 @@ def batch_generate(args):
                 eos_token_id=tokenizer.eos_token_id,
             )
             input_length = inputs["input_ids"].shape[1]
-            outputs = tokenizer.batch_decode(outputs[:, input_length:], skip_special_tokens=False)
+            outputs = tokenizer.batch_decode(outputs[:, input_length:], skip_special_tokens=True)
 
             for i, output in enumerate(outputs):
                 # 保存索引和输出的对应关系
@@ -195,8 +195,8 @@ def main():
     pretrain = "/root/data/models/actor-llama-3.1-8b-sft-gsm8k-st"
     dataset = "openai/gsm8k"
     input_key = "question"
-    max_samples = 128
-    output_path = "xuhao/solve/data/output/solution_actor_with_st_in_gsm8k_test.json"
+    max_samples = 100000
+    output_path = "xuhao/solve/data/output/solution_actor_with_st_gsm8k_test.json"
     prompt_max_length = 4096
     max_new_tokens = 1024
     micro_batch_size = 8
