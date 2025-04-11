@@ -3,21 +3,21 @@ import json
 from datasets import Dataset, DatasetDict
 from xuhao.utils import get_grouped_data
 
-verification_result_file = "xuhao/verify/data/output/verification_result_claude_new.json"
-verification_result_label_file = "xuhao/verify/data/output/verification_result_label_claude_new.json"
-verification_data_file = "xuhao/verify/data/input/verification_data_new.json"
-sft_dataset_file = "xuhao/sft/data/input/sft_data_new.json"
-sft_dataset_dir = "xuhao/sft/data/input/sft_data_new"
+verification_result_file = "xuhao/verify/data/output/verification_output_gpt4o.json"
+verification_result_label_file = "xuhao/verify/data/output/verification_output_label_gpt4o.json"
+verification_input_file = "xuhao/verify/data/input/verification_input.json"
+sft_dataset_file = "xuhao/sft/data/input/sft_data.json"
+sft_dataset_dir = "xuhao/sft/data/input/sft_data"
 
-def get_verification_input(verification_data, problem_index, step_index):
-    for data in verification_data:
+def get_verification_input(verification_input, problem_index, step_index):
+    for data in verification_input:
         if data["problem_index"] == problem_index and data["step_index"] == step_index:
             return data["verification_input"]
 
 def prepare_sft_dataset(train_test_ratio=24):
-    with open(verification_result_file, 'r') as f1, open(verification_data_file, 'r') as f2:
+    with open(verification_result_file, 'r') as f1, open(verification_input_file, 'r') as f2:
         verification_result = json.load(f1)
-        verification_data = json.load(f2)
+        verification_input = json.load(f2)
     with open(verification_result_label_file, 'r') as f:
         verification_result_label = json.load(f)
 
@@ -30,7 +30,7 @@ def prepare_sft_dataset(train_test_ratio=24):
             data.append({
                 "problem_index": problem_index,
                 "step_index": step_index,
-                "input": get_verification_input(verification_data, problem_index, step_index),
+                "input": get_verification_input(verification_input, problem_index, step_index),
                 "output": verification_result[i]["verification_result"]
             })
     
@@ -118,5 +118,5 @@ def convert_dataset_format():
 
 if __name__ == "__main__":
     # prepare_sft_dataset(train_test_ratio=9)
-    convert_dataset_format()
-    get_sft_data_distribution("xuhao/sft/data/input/sft_data_new.json")
+    # convert_dataset_format()
+    # get_sft_data_distribution("xuhao/sft/data/input/sft_data.json")
